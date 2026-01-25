@@ -1,6 +1,19 @@
 # CrowdSec Blocklist Import
 
-Dockerized tool to import 28+ public threat feeds directly into CrowdSec. Get 60,000+ threat IPs from premium-quality sources - for free\!
+**Get premium-level threat protection for FREE.** This tool imports 60,000+ IPs from 28 public threat feeds directly into CrowdSec - no subscription required.
+
+## Why Use This?
+
+| | CrowdSec Free | CrowdSec Pro ($50/mo) | **Free + This Tool** |
+|---|:---:|:---:|:---:|
+| Community Intel (CAPI) | ~22k IPs | ~22k IPs | ~22k IPs |
+| Premium Blocklists | ❌ | ✅ | ✅ **60k+ IPs** |
+| Tor Exit Nodes | ❌ | ✅ | ✅ |
+| Scanner Blocking | ❌ | ✅ | ✅ |
+| All Your Bouncers | ✅ | ✅ | ✅ |
+| **Monthly Cost** | **$0** | **$50** | **$0** |
+
+**How it works:** Import blocklists once into CrowdSec → All your bouncers (UniFi firewall, NPM, Cloudflare, WordPress, etc.) automatically enforce them. One import, network-wide protection.
 
 ## Features
 
@@ -9,7 +22,6 @@ Dockerized tool to import 28+ public threat feeds directly into CrowdSec. Get 60
 - **Private IP Filtering**: Automatically excludes RFC1918 and reserved ranges
 - **Docker Ready**: Run as a container with Docker socket access
 - **Cron Friendly**: Designed for daily runs with 24h decision expiration
-- **Lightweight**: Single shell script, minimal dependencies
 
 ## Included Blocklists
 
@@ -63,7 +75,7 @@ Run once: `docker compose up`
 ### Scheduled via Cron (Host)
 
 ```bash
-# Run daily at 4am
+# Run daily at 4am to refresh blocklists
 0 4 * * * docker compose -f /path/to/docker-compose.yml up --abort-on-container-exit
 ```
 
@@ -87,9 +99,26 @@ docker run --rm \
 
 ## How It Works
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ONE IMPORT = ALL BOUNCERS                    │
+└─────────────────────────────────────────────────────────────────┘
+
+     28 Free Blocklists ──► crowdsec-blocklist-import ──► CrowdSec
+                                                              │
+                    ┌─────────────────────────────────────────┤
+                    │                    │                    │
+                    ▼                    ▼                    ▼
+              UniFi Firewall      NPM/Nginx WAF      Cloudflare Worker
+              (router-level)      (reverse proxy)    (edge blocking)
+                    │                    │                    │
+                    └────────────────────┴────────────────────┘
+                              Network-Wide Protection
+```
+
 1. **Fetch**: Downloads 28+ blocklists from public sources
 2. **Combine**: Merges all IPs and removes duplicates  
-3. **Filter**: Excludes private ranges (10.x, 192.168.x, etc.) and known good IPs
+3. **Filter**: Excludes private ranges (10.x, 192.168.x, etc.)
 4. **Dedupe**: Queries CrowdSec for existing decisions to avoid duplicates
 5. **Import**: Bulk imports new IPs via `cscli decisions import`
 
@@ -101,50 +130,11 @@ Decisions are tagged with `external_blocklist` reason for easy identification.
 # Count imported decisions
 docker exec crowdsec cscli decisions list | grep external_blocklist | wc -l
 
-# List by source (in logs)
-docker logs crowdsec-blocklist-import
+# List recent decisions
+docker exec crowdsec cscli decisions list -l 20
 
 # Remove all imported decisions (if needed)
 docker exec crowdsec cscli decisions delete --all --reason external_blocklist
-```
-
-## Why Use This?
-
-CrowdSec's free tier includes community threat intel (CAPI) and some console blocklists, but many premium feeds require a paid subscription. This tool gives you:
-
-- **More coverage**: 60k+ IPs vs ~22k from CAPI alone
-- **Tor blocking**: Official Tor exit node lists
-- **Scanner blocking**: Shodan, Censys, and other mass scanners
-- **Zero cost**: All sources are freely available
-
-## Architecture
-
-```
-                         ┌─────────────────────┐
-                         │  Public Blocklists  │
-                         │  (28+ sources)      │
-                         └─────────┬───────────┘
-                                   │
-                                   ▼
-┌─────────────────────────────────────────────────────┐
-│           crowdsec-blocklist-import                 │
-│  ┌─────────┐  ┌──────────┐  ┌─────────────────┐   │
-│  │  Fetch  │→ │  Filter  │→ │  Import to CS   │   │
-│  └─────────┘  └──────────┘  └─────────────────┘   │
-└─────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
-                         ┌─────────────────────┐
-                         │     CrowdSec        │
-                         │   (decisions DB)    │
-                         └─────────────────────┘
-                                   │
-              ┌────────────────────┼────────────────────┐
-              ▼                    ▼                    ▼
-        ┌─────────┐          ┌─────────┐          ┌─────────┐
-        │ Bouncer │          │ Bouncer │          │ Bouncer │
-        │ (NPM)   │          │ (UniFi) │          │ (CF)    │
-        └─────────┘          └─────────┘          └─────────┘
 ```
 
 ## Related Projects
@@ -157,4 +147,4 @@ MIT License - see [LICENSE](LICENSE)
 
 ## Contributing
 
-Contributions welcome\! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
