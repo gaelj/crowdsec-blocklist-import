@@ -146,11 +146,13 @@ MODE=docker CROWDSEC_CONTAINER=crowdsec ./import.sh
 
 This tool needs to run `cscli decisions import` inside your CrowdSec container. Docker mode uses `docker exec` which requires socket access.
 
-**Mitigations:**
-- Socket is mounted **read-only** (`:ro`) - container cannot modify Docker
-- Container runs as non-root internally
-- Runs once and exits (not a long-running daemon)
-- Fully open source - audit the code yourself
+**Reality check:** Docker socket access = root-equivalent access. The `:ro` flag only prevents writing to the socket *file*, not API commands through it.
+
+**Why it's still reasonable:**
+- **150 lines of bash** - fully auditable in 5 minutes
+- **Runs once and exits** - not a persistent daemon
+- **Single purpose** - only runs `docker exec ... cscli decisions import`
+- **Open source** - inspect exactly what it does before running
 
 **Alternatives if you're concerned:**
 1. **Direct mode**: Run `import.sh` on the host (no Docker needed)
