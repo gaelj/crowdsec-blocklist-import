@@ -117,11 +117,28 @@ cd crowdsec-blocklist-import
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `CROWDSEC_CONTAINER` | `crowdsec` | Name of your CrowdSec container |
+| `MODE` | `auto` | `auto`, `native`, or `docker` - how to access CrowdSec |
+| `CROWDSEC_CONTAINER` | `crowdsec` | Name of your CrowdSec container (Docker mode) |
 | `DECISION_DURATION` | `24h` | How long decisions last (refresh daily) |
 | `LOG_LEVEL` | `INFO` | Logging verbosity (DEBUG, INFO, WARN, ERROR) |
 | `TZ` | `UTC` | Timezone for logs |
 | `TELEMETRY_ENABLED` | `true` | Anonymous usage stats (set false to disable) |
+
+### Mode Selection
+
+The script auto-detects how CrowdSec is running:
+
+1. **Native** (preferred if available): Uses `cscli` directly from PATH
+2. **Docker**: Falls back to `docker exec` if native not found
+
+Force a specific mode:
+```bash
+# Native CrowdSec (installed on host)
+MODE=native ./import.sh
+
+# Docker CrowdSec
+MODE=docker CROWDSEC_CONTAINER=crowdsec ./import.sh
+```
 
 ## Security
 
