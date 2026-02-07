@@ -2,6 +2,7 @@
 # CrowdSec Blocklist Import
 # Imports 28+ public threat feeds directly into CrowdSec
 #
+# v2.3.0 - Track blocklist sources per IP in decision metadata
 # v2.2.0 - Implement allow-lists (fixes #26)
 # v2.1.1 - Default MAX_DECISIONS=40000 to prevent bouncer overload (fixes #21)
 # v2.0.0 - Direct LAPI mode: no Docker socket needed (closes #9, #10)
@@ -13,7 +14,7 @@ set -e
 # Ensure standard paths are available (fixes: "sudo ./import.sh" not finding docker/cscli)
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/bin:/snap/bin:$PATH"
 
-VERSION="2.2.0"
+VERSION="2.3.0"
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 CROWDSEC_CONTAINER="${CROWDSEC_CONTAINER:-crowdsec}"
 DECISION_DURATION="${DECISION_DURATION:-24h}"
@@ -76,6 +77,11 @@ ALLOWLIST_URL="${ALLOWLIST_URL:-}"
 ALLOWLIST_FILE="${ALLOWLIST_FILE:-}"
 # Inline allow-list as comma-separated values (e.g. "1.1.1.1,8.8.8.8,192.168.1.0/24")
 ALLOWLIST="${ALLOWLIST:-}"
+
+# Source tracking: include blocklist names in decision metadata
+# When enabled, each IP's decision will show which blocklist(s) it came from
+# Set TRACK_SOURCES=false to use the generic "external_blocklist" scenario for all IPs (faster)
+TRACK_SOURCES="${TRACK_SOURCES:-true}"
 
 # Telemetry (enabled by default, set TELEMETRY_ENABLED=false to disable)
 TELEMETRY_ENABLED="${TELEMETRY_ENABLED:-true}"
@@ -302,6 +308,21 @@ apply_allowlist() {
     fi
 
     mv "$temp_file" "$input_file"
+}
+
+# Get blocklist sources for an IP address
+get_ip_sources() {
+    local ip="$1"
+    # Convert CIDR slashes to underscores for filename lookup
+    local ip_safe=$(echo "$ip" | tr '/' '_')
+    local sources_file="$TEMP_DIR/sources/${ip_safe}.sources"
+
+    if [ -f "$sources_file" ]; then
+        # Return comma-separated list of unique sources
+        sort -u "$sources_file" | tr '\n' ',' | sed 's/,$//'
+    else
+        echo "unknown"
+    fi
 }
 
 # --- Device memory query (two-layer guardrail) ---
@@ -669,30 +690,81 @@ lapi_import_batch() {
     local now=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
     local payload_file="$TEMP_DIR/payload_${batch_num}.json"
 
-    # Build JSON payload using awk (fast, no jq needed)
-    awk -v dur="$DECISION_DURATION" -v now="$now" -v bn="$batch_num" '
-        BEGIN {
-            printf "[{\"scenario\":\"crowdsec-blocklist-import/external_blocklist\","
-            printf "\"scenario_hash\":\"\",\"scenario_version\":\"\","
-            printf "\"message\":\"External blocklist import batch %s\",", bn
-            printf "\"events_count\":1,"
-            printf "\"start_at\":\"%s\",\"stop_at\":\"%s\",", now, now
-            printf "\"capacity\":0,\"leakspeed\":\"0\",\"simulated\":false,"
-            printf "\"events\":[],\"source\":{\"scope\":\"ip\",\"value\":\"127.0.0.1\"},"
-            printf "\"decisions\":["
-            first=1
-        }
-        NF {
-            if (!first) printf ","
-            printf "{\"origin\":\"cscli\",\"type\":\"ban\",\"scope\":\"ip\","
-            printf "\"value\":\"%s\",\"duration\":\"%s\",",$0, dur
-            printf "\"scenario\":\"crowdsec-blocklist-import/external_blocklist\"}"
-            first=0
-        }
-        END {
-            printf "]}]"
-        }
-    ' "$batch_file" > "$payload_file"
+    if [ "$TRACK_SOURCES" = "true" ]; then
+        # Build JSON payload with source tracking
+        {
+            echo '['
+            local first=true
+            while read -r ip; do
+                [ -z "$ip" ] && continue
+                local sources=$(get_ip_sources "$ip")
+                local scenario="blocklist/${sources}"
+                local message="Blocklist: ${sources}"
+
+                if [ "$first" = true ]; then
+                    first=false
+                else
+                    echo ','
+                fi
+
+                cat << EOF
+{
+  "scenario": "$scenario",
+  "scenario_hash": "",
+  "scenario_version": "",
+  "message": "$message",
+  "events_count": 1,
+  "start_at": "$now",
+  "stop_at": "$now",
+  "capacity": 0,
+  "leakspeed": "0",
+  "simulated": false,
+  "events": [],
+  "source": {
+    "scope": "ip",
+    "value": "127.0.0.1"
+  },
+  "decisions": [
+    {
+      "origin": "cscli",
+      "type": "ban",
+      "scope": "ip",
+      "value": "$ip",
+      "duration": "$DECISION_DURATION",
+      "scenario": "$scenario"
+    }
+  ]
+}
+EOF
+            done < "$batch_file"
+            echo ']'
+        } > "$payload_file"
+    else
+        # Generic bulk import (faster)
+        awk -v dur="$DECISION_DURATION" -v now="$now" -v bn="$batch_num" '
+            BEGIN {
+                printf "[{\"scenario\":\"crowdsec-blocklist-import/external_blocklist\","
+                printf "\"scenario_hash\":\"\",\"scenario_version\":\"\","
+                printf "\"message\":\"External blocklist import batch %s\",", bn
+                printf "\"events_count\":1,"
+                printf "\"start_at\":\"%s\",\"stop_at\":\"%s\",", now, now
+                printf "\"capacity\":0,\"leakspeed\":\"0\",\"simulated\":false,"
+                printf "\"events\":[],\"source\":{\"scope\":\"ip\",\"value\":\"127.0.0.1\"},"
+                printf "\"decisions\":["
+                first=1
+            }
+            NF {
+                if (!first) printf ","
+                printf "{\"origin\":\"cscli\",\"type\":\"ban\",\"scope\":\"ip\","
+                printf "\"value\":\"%s\",\"duration\":\"%s\",",$0, dur
+                printf "\"scenario\":\"crowdsec-blocklist-import/external_blocklist\"}"
+                first=0
+            }
+            END {
+                printf "]}]"
+            }
+        ' "$batch_file" > "$payload_file"
+    fi
 
     local response
     response=$(curl -s -X POST "${url}/v1/alerts" \
@@ -766,6 +838,15 @@ fetch_list() {
             debug "$name: $count entries"
             ((SOURCES_OK++)) || true
             record_stat "$name" "$count"
+            # Track source for each IP (if enabled)
+            if [ "$TRACK_SOURCES" = "true" ]; then
+                while read -r ip; do
+                    [ -z "$ip" ] && continue
+                    # Convert CIDR slashes to underscores for valid filenames
+                    local ip_safe=$(echo "$ip" | tr '/' '_')
+                    echo "$name" >> "$TEMP_DIR/sources/${ip_safe}.sources"
+                done < "$output"
+            fi
         else
             debug "$name: empty response"
             ((SOURCES_FAILED++)) || true
@@ -795,6 +876,7 @@ main() {
     [ -n "$DOCKER_API_VERSION" ] && info "Docker API version: $DOCKER_API_VERSION"
     [ -n "$CROWDSEC_LAPI_URL" ] && info "LAPI: $CROWDSEC_LAPI_URL"
     [ -n "$BOUNCER_SSH" ] && info "Device monitoring: $BOUNCER_SSH"
+    [ "$TRACK_SOURCES" = "true" ] && info "Source tracking: enabled (scenarios will show blocklist names)" || info "Source tracking: disabled (using generic scenario)"
 
     # Show any disabled source overrides
     show_source_overrides
@@ -802,6 +884,10 @@ main() {
     setup_crowdsec
 
     mkdir -p "$TEMP_DIR"
+    if [ "$TRACK_SOURCES" = "true" ]; then
+        mkdir -p "$TEMP_DIR/sources"
+        rm -rf "$TEMP_DIR/sources"/* 2>/dev/null || true
+    fi
     cd "$TEMP_DIR"
     rm -f *.txt *.list .stats 2>/dev/null || true
 
@@ -966,6 +1052,15 @@ main() {
 74.120.14.0/24
 167.248.133.0/24
 EOF
+        # Track sources for Censys IPs (if enabled)
+        if [ "$TRACK_SOURCES" = "true" ]; then
+            while read -r ip; do
+                [ -z "$ip" ] && continue
+                # Convert CIDR slashes to underscores for valid filenames
+                local ip_safe=$(echo "$ip" | tr '/' '_')
+                echo "Censys" >> "$TEMP_DIR/sources/${ip_safe}.sources"
+            done < censys.txt
+        fi
         ((SOURCES_OK++)) || true
         record_stat "Censys" 4
     else
@@ -1059,6 +1154,28 @@ EOF
                 printf "%d.%d.%d.%d\n", $1, $2, $3, $4
         }' | \
         sort -u > combined.txt
+
+    # Build consolidated source mapping for deduplicated IPs (if tracking enabled)
+    if [ "$TRACK_SOURCES" = "true" ]; then
+        info "Building source mappings..."
+        while read -r ip; do
+            [ -z "$ip" ] && continue
+            # Convert CIDR slashes to underscores for filename
+            local ip_safe=$(echo "$ip" | tr '/' '_')
+            if [ -f "$TEMP_DIR/sources/${ip_safe}.sources" ]; then
+                # Sources already tracked during fetch
+                continue
+            else
+                # Fallback: check which source files contain this IP
+                for source_file in *.txt; do
+                    if grep -qF "$ip" "$source_file" 2>/dev/null; then
+                        local source_name=$(basename "$source_file" .txt)
+                        echo "$source_name" >> "$TEMP_DIR/sources/${ip_safe}.sources"
+                    fi
+                done
+            fi
+        done < combined.txt
+    fi
 
     # Filter private/reserved ranges
     grep -vE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|255\.|100\.(6[4-9]|[7-9][0-9]|1[0-2][0-7])\.)" combined.txt | \
@@ -1164,7 +1281,33 @@ EOF
         info "Import complete: $import_count IPs added (total coverage: $total_ips IPs)"
     else
         info "Importing $import_count new IPs into CrowdSec..."
-        result=$(cat to_import.txt | run_cscli_stdin decisions import -i - --format values --duration "$DECISION_DURATION" --reason "external_blocklist" 2>&1)
+        if [ "$TRACK_SOURCES" = "true" ]; then
+            # Import IPs one by one with source-specific scenarios
+            local imported=0
+            while read -r ip; do
+                [ -z "$ip" ] && continue
+                local sources=$(get_ip_sources "$ip")
+                local scenario="blocklist/${sources}"
+                local reason="Blocklist: ${sources}"
+
+                echo "$ip" | run_cscli_stdin decisions import -i - \
+                    --format values \
+                    --duration "$DECISION_DURATION" \
+                    --reason "$reason" \
+                    --scenario "$scenario" 2>&1 | grep -v "^$" || true
+
+                ((imported++)) || true
+                if [ $((imported % 100)) -eq 0 ]; then
+                    debug "Imported $imported/$import_count IPs..."
+                fi
+            done < to_import.txt
+        else
+            # Bulk import with generic scenario (faster)
+            result=$(cat to_import.txt | run_cscli_stdin decisions import -i - \
+                --format values \
+                --duration "$DECISION_DURATION" \
+                --reason "external_blocklist" 2>&1)
+        fi
         info "Import complete: $import_count IPs added (total coverage: $total_ips IPs)"
     fi
 
