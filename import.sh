@@ -682,6 +682,82 @@ lapi_list_decisions() {
     done | sort -u
 }
 
+# Import a batch of IPs via POST /v1/alerts with specific sources
+lapi_import_batch_with_sources() {
+    local batch_file="$1"
+    local sources="$2"
+    local batch_id="$3"
+    local url="$(normalize_url "$CROWDSEC_LAPI_URL")"
+    local now=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
+    local payload_file="$TEMP_DIR/payload_${batch_id}.json"
+
+    local scenario="blocklist/${sources}"
+    local message="Blocklist: ${sources}"
+
+    # Build JSON payload for this specific source combination
+    {
+        echo '['
+        local first=true
+        while read -r ip; do
+            [ -z "$ip" ] && continue
+
+            if [ "$first" = true ]; then
+                first=false
+            else
+                echo ','
+            fi
+
+            cat << EOF
+{
+  "scenario": "$scenario",
+  "scenario_hash": "",
+  "scenario_version": "",
+  "message": "$message",
+  "events_count": 1,
+  "start_at": "$now",
+  "stop_at": "$now",
+  "capacity": 0,
+  "leakspeed": "0",
+  "simulated": false,
+  "events": [],
+  "source": {
+    "scope": "ip",
+    "value": "127.0.0.1"
+  },
+  "decisions": [
+    {
+      "origin": "cscli",
+      "type": "ban",
+      "scope": "ip",
+      "value": "$ip",
+      "duration": "$DECISION_DURATION",
+      "scenario": "$scenario"
+    }
+  ]
+}
+EOF
+        done < "$batch_file"
+        echo ']'
+    } > "$payload_file"
+
+    local response
+    response=$(curl -s -X POST "${url}/v1/alerts" \
+        -H "Authorization: Bearer $LAPI_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d @"$payload_file" \
+        --max-time 120 2>&1)
+
+    rm -f "$payload_file"
+
+    # Check for success (response is array of alert IDs)
+    if echo "$response" | grep -qE '^\['; then
+        return 0
+    else
+        warn "Batch $batch_id: $response"
+        return 1
+    fi
+}
+
 # Import a batch of IPs via POST /v1/alerts
 lapi_import_batch() {
     local batch_file="$1"
@@ -691,7 +767,7 @@ lapi_import_batch() {
     local payload_file="$TEMP_DIR/payload_${batch_num}.json"
 
     if [ "$TRACK_SOURCES" = "true" ]; then
-        # Build JSON payload with source tracking
+        # Build JSON payload with per-IP source tracking
         {
             echo '['
             local first=true
@@ -788,30 +864,99 @@ EOF
 lapi_import() {
     local ip_file="$1"
     local total=$(wc -l < "$ip_file")
-    local imported=0
-    local batch_num=0
-    local failed=0
 
-    while [ $imported -lt $total ]; do
-        batch_num=$((batch_num + 1))
-        local batch_file="$TEMP_DIR/batch_${batch_num}.txt"
+    if [ "$TRACK_SOURCES" = "true" ]; then
+        # Group IPs by source combination for more efficient batching
+        info "Grouping IPs by source for batch import..."
 
-        # Extract batch
-        tail -n +$((imported + 1)) "$ip_file" | head -n "$LAPI_BATCH_SIZE" > "$batch_file"
-        local batch_count=$(wc -l < "$batch_file")
+        # Create temporary files for each source combination
+        declare -A source_files
+        local file_counter=0
 
-        if lapi_import_batch "$batch_file" "$batch_num"; then
-            debug "Batch $batch_num: $batch_count IPs imported"
-        else
-            ((failed++)) || true
+        while read -r ip; do
+            [ -z "$ip" ] && continue
+            local sources=$(get_ip_sources "$ip")
+
+            # Create or reuse file for this source combination
+            if [ -z "${source_files[$sources]}" ]; then
+                ((file_counter++)) || true
+                local temp_file="$TEMP_DIR/source_group_${file_counter}.txt"
+                source_files[$sources]="$temp_file"
+                echo "$ip" > "$temp_file"
+            else
+                echo "$ip" >> "${source_files[$sources]}"
+            fi
+        done < "$ip_file"
+
+        # Import each source group in batches
+        local imported=0
+        local failed=0
+        local group_num=0
+        local total_groups=${#source_files[@]}
+
+        info "Importing $total_groups source group(s) in batches of $LAPI_BATCH_SIZE..."
+
+        for sources in "${!source_files[@]}"; do
+            ((group_num++)) || true
+            local group_file="${source_files[$sources]}"
+            local group_total=$(wc -l < "$group_file")
+            local group_imported=0
+            local batch_num=0
+
+            debug "Group $group_num/$total_groups: [$sources] ($group_total IPs)"
+
+            while [ $group_imported -lt $group_total ]; do
+                ((batch_num++)) || true
+                local batch_file="$TEMP_DIR/batch_g${group_num}_b${batch_num}.txt"
+
+                # Extract batch
+                tail -n +$((group_imported + 1)) "$group_file" | head -n "$LAPI_BATCH_SIZE" > "$batch_file"
+                local batch_count=$(wc -l < "$batch_file")
+
+                if lapi_import_batch_with_sources "$batch_file" "$sources" "g${group_num}_b${batch_num}"; then
+                    debug "Group $group_num, Batch $batch_num: $batch_count IPs imported"
+                else
+                    ((failed++)) || true
+                fi
+
+                group_imported=$((group_imported + batch_count))
+                imported=$((imported + batch_count))
+                rm -f "$batch_file"
+            done
+
+            rm -f "$group_file"
+        done
+
+        if [ $failed -gt 0 ]; then
+            warn "$failed batch(es) had errors"
         fi
+    else
+        # Original batched import without source tracking
+        local imported=0
+        local batch_num=0
+        local failed=0
 
-        imported=$((imported + batch_count))
-        rm -f "$batch_file"
-    done
+        while [ $imported -lt $total ]; do
+            batch_num=$((batch_num + 1))
+            local batch_file="$TEMP_DIR/batch_${batch_num}.txt"
 
-    if [ $failed -gt 0 ]; then
-        warn "$failed batch(es) had errors"
+            # Extract batch
+            tail -n +$((imported + 1)) "$ip_file" | head -n "$LAPI_BATCH_SIZE" > "$batch_file"
+            local batch_count=$(wc -l < "$batch_file")
+
+            if lapi_import_batch "$batch_file" "$batch_num"; then
+                debug "Batch $batch_num: $batch_count IPs imported"
+            else
+                ((failed++)) || true
+            fi
+
+            imported=$((imported + batch_count))
+            rm -f "$batch_file"
+        done
+
+        if [ $failed -gt 0 ]; then
+            warn "$failed batch(es) had errors"
+        fi
     fi
 }
 
@@ -842,9 +987,26 @@ fetch_list() {
             if [ "$TRACK_SOURCES" = "true" ]; then
                 while read -r ip; do
                     [ -z "$ip" ] && continue
+
+                    # Validate IP/CIDR format (skip HTML, URLs, invalid entries)
+                    if ! echo "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$'; then
+                        debug "Skipping invalid entry from $name: ${ip:0:50}..."
+                        continue
+                    fi
+
                     # Convert CIDR slashes to underscores for valid filenames
                     local ip_safe=$(echo "$ip" | tr '/' '_')
-                    echo "$name" >> "$TEMP_DIR/sources/${ip_safe}.sources"
+
+                    # Additional safety: limit filename length (max 255 chars for most filesystems)
+                    if [ ${#ip_safe} -gt 200 ]; then
+                        debug "Skipping entry with too-long filename from $name: ${ip_safe:0:50}..."
+                        continue
+                    fi
+
+                    echo "$name" >> "$TEMP_DIR/sources/${ip_safe}.sources" 2>/dev/null || {
+                        debug "Failed to write source tracking for: ${ip_safe:0:50}"
+                        continue
+                    }
                 done < "$output"
             fi
         else
@@ -895,7 +1057,7 @@ main() {
     touch "$TEMP_DIR/.stats"
 
     # Load allow-list (fixes #26)
-    load_allowlist
+    ALLOWLIST_PATH=$(load_allowlist)
 
     # Count enabled built-in sources
     local total_builtin=36
@@ -1000,7 +1162,7 @@ main() {
     fetch_list "Talos" \
         "https://www.talosintelligence.com/documents/ip-blacklist" \
         "talos.txt" \
-        "grep -v '^#'"
+        "grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'"
 
     fetch_list "Charles Haley" \
         "https://charles.the-haleys.org/ssh_dico_attack_hdeny_format.php/hostsdeny.txt" \
@@ -1056,9 +1218,15 @@ EOF
         if [ "$TRACK_SOURCES" = "true" ]; then
             while read -r ip; do
                 [ -z "$ip" ] && continue
+
+                # Validate IP/CIDR format
+                if ! echo "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$'; then
+                    continue
+                fi
+
                 # Convert CIDR slashes to underscores for valid filenames
                 local ip_safe=$(echo "$ip" | tr '/' '_')
-                echo "Censys" >> "$TEMP_DIR/sources/${ip_safe}.sources"
+                echo "Censys" >> "$TEMP_DIR/sources/${ip_safe}.sources" 2>/dev/null || true
             done < censys.txt
         fi
         ((SOURCES_OK++)) || true
@@ -1160,8 +1328,22 @@ EOF
         info "Building source mappings..."
         while read -r ip; do
             [ -z "$ip" ] && continue
+
+            # Validate IP format
+            if ! echo "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$'; then
+                debug "Skipping invalid IP in consolidation: ${ip:0:50}..."
+                continue
+            fi
+
             # Convert CIDR slashes to underscores for filename
             local ip_safe=$(echo "$ip" | tr '/' '_')
+
+            # Additional safety check
+            if [ ${#ip_safe} -gt 200 ]; then
+                debug "Skipping IP with too-long filename in consolidation: ${ip_safe:0:50}..."
+                continue
+            fi
+
             if [ -f "$TEMP_DIR/sources/${ip_safe}.sources" ]; then
                 # Sources already tracked during fetch
                 continue
@@ -1170,7 +1352,7 @@ EOF
                 for source_file in *.txt; do
                     if grep -qF "$ip" "$source_file" 2>/dev/null; then
                         local source_name=$(basename "$source_file" .txt)
-                        echo "$source_name" >> "$TEMP_DIR/sources/${ip_safe}.sources"
+                        echo "$source_name" >> "$TEMP_DIR/sources/${ip_safe}.sources" 2>/dev/null || true
                     fi
                 done
             fi
@@ -1282,33 +1464,59 @@ EOF
     else
         info "Importing $import_count new IPs into CrowdSec..."
         if [ "$TRACK_SOURCES" = "true" ]; then
-            # Import IPs one by one with source-specific scenarios
-            local imported=0
+            # Group IPs by their source combinations for batch import
+            info "Grouping IPs by source for efficient batch import..."
+
+            # Create a mapping of sources -> IPs
+            declare -A source_batches
             while read -r ip; do
                 [ -z "$ip" ] && continue
                 local sources=$(get_ip_sources "$ip")
+                # Append IP to the list for this source combination
+                if [ -z "${source_batches[$sources]}" ]; then
+                    source_batches[$sources]="$ip"
+                else
+                    source_batches[$sources]="${source_batches[$sources]}
+$ip"
+                fi
+            done < to_import.txt
+
+            # Import each batch with its specific scenario
+            local batch_num=0
+            local total_imported=0
+            local num_batches=${#source_batches[@]}
+            info "Importing $num_batches batch(es) grouped by source combination..."
+
+            for sources in "${!source_batches[@]}"; do
+                ((batch_num++)) || true
+                local batch_file="$TEMP_DIR/batch_${batch_num}.txt"
+                echo "${source_batches[$sources]}" > "$batch_file"
+                local batch_count=$(wc -l < "$batch_file")
+
                 local scenario="blocklist/${sources}"
                 local reason="Blocklist: ${sources}"
 
-                echo "$ip" | run_cscli_stdin decisions import -i - \
+                debug "Batch $batch_num/$num_batches: $batch_count IPs from [$sources]"
+
+                cat "$batch_file" | run_cscli_stdin decisions import -i - \
                     --format values \
                     --duration "$DECISION_DURATION" \
                     --reason "$reason" \
                     --scenario "$scenario" 2>&1 | grep -v "^$" || true
 
-                ((imported++)) || true
-                if [ $((imported % 100)) -eq 0 ]; then
-                    debug "Imported $imported/$import_count IPs..."
-                fi
-            done < to_import.txt
+                total_imported=$((total_imported + batch_count))
+                rm -f "$batch_file"
+            done
+
+            info "Import complete: $total_imported IPs added in $num_batches batch(es) (total coverage: $total_ips IPs)"
         else
-            # Bulk import with generic scenario (faster)
+            # Bulk import with generic scenario (fastest)
             result=$(cat to_import.txt | run_cscli_stdin decisions import -i - \
                 --format values \
                 --duration "$DECISION_DURATION" \
                 --reason "external_blocklist" 2>&1)
+            info "Import complete: $import_count IPs added (total coverage: $total_ips IPs)"
         fi
-        info "Import complete: $import_count IPs added (total coverage: $total_ips IPs)"
     fi
 
     # Send telemetry
