@@ -54,7 +54,7 @@ except ImportError:
         """Stub if python-dotenv is not installed."""
         pass
 
-__version__ = "3.5.0"
+__version__ = "3.5.1-alpha.3"
 
 # =============================================================================
 # Environment Variable Validation
