@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug blocklist_import.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/blocklist_import.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "NIX_PATH": "nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos"
+            },
+            "args": [],
+        }
+    ]
+}
