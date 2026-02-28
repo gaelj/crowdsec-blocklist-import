@@ -1915,6 +1915,25 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
             stats=stats,
             logger=logger,
         )
+
+        # --- Update per-source metrics immediately after fetch ---
+        if metrics:
+            if abuseipdb_result.success:
+                metrics.record_source_success(
+                    source_name="AbuseIPDB API",
+                    ip_count=abuseipdb_result.ip_count,
+                    duration=abuseipdb_result.duration,
+                )
+                if abuseipdb_result.parse_errors:
+                    metrics.record_parse_errors("AbuseIPDB API", abuseipdb_result.parse_errors)
+            else:
+                metrics.record_source_failure(
+                    source_name="AbuseIPDB API",
+                    error_type=abuseipdb_result.error_type or "fetch",
+                    exc=abuseipdb_result.error_exc,
+                    duration=abuseipdb_result.duration,
+                )
+
         if abuseipdb_result.success:
             stats.sources_ok += 1
         else:
@@ -2108,6 +2127,7 @@ def fetch_abuseipdb_api(
     )
 
     new_ips: list[str] = []
+    t0 = time.time()
 
     if not abuseipdb_api_key:
         return new_ips, FetchResult(source=source, success=True, ip_count=0)
@@ -2149,14 +2169,17 @@ def fetch_abuseipdb_api(
                 stats.parse_errors += 1
 
         logger.debug(f"AbuseIPDB API: {len(new_ips)} unique new IPs")
-        return new_ips, FetchResult(source=source, success=True, ip_count=len(new_ips))
+        duration = time.time() - t0
+        return new_ips, FetchResult(source=source, success=True, ip_count=len(new_ips), duration=duration)
 
     except requests.RequestException as e:
+        duration = time.time() - t0
         logger.warning(f"AbuseIPDB API: unavailable ({e})")
-        return new_ips, FetchResult(source=source, success=False, error_type="fetch", error_exc=e)
+        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
     except Exception as e:
+        duration = time.time() - t0
         logger.error(f"AbuseIPDB API: unexpected error ({e})")
-        return new_ips, FetchResult(source=source, success=False, error_type="fetch", error_exc=e)
+        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
 
 
 # =============================================================================
