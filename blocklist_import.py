@@ -1790,6 +1790,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
     logger.info(f"Decision duration: {config.decision_duration}")
     logger.info(f"LAPI URL: {config.lapi_url}")
     logger.info(f"Machine ID: {config.machine_id}")
+    logger.info(f"Mode: {config.mode}")
 
     if config.dry_run:
         logger.info("DRY RUN MODE - no changes will be made")
@@ -2424,7 +2425,7 @@ def main() -> int:
         list_blocklist_sources(logger)
         return 0
 
-    # Initialize and start Prometheus metrics server
+    # Initialize Prometheus metrics
     if config.metrics_enabled and PROMETHEUS_AVAILABLE:
         init_metrics(config.pushgateway_url, logger)
 
