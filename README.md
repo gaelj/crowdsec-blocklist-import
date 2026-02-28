@@ -11,9 +11,11 @@
 
 ## Security Advisory
 
-This is the official CrowdSec blocklist import tool maintained at [wolffcatskyy/crowdsec-blocklist-import](https://github.com/wolffcatskyy/crowdsec-blocklist-import).
+~~This is the official CrowdSec blocklist import tool maintained at [wolffcatskyy/crowdsec-blocklist-import](https://github.com/wolffcatskyy/crowdsec-blocklist-import).~~
 
-If you downloaded this from another source or a different GitHub user, you may be using an impostor repository with malicious code. Always verify you're using the official source.
+~~If you downloaded this from another source or a different GitHub user, you may be using an impostor repository with malicious code. Always verify you're using the official source.~~
+
+This is a fork of the official CrowdSec blocklist import tool.
 
 ---
 
