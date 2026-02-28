@@ -1407,6 +1407,91 @@ def fetch_blocklist(
             error_exc=e,
         )
 
+# =============================================================================
+# AbuseIPDB Direct API
+# =============================================================================
+
+def fetch_abuseipdb_api(
+    config: Config,
+    abuseipdb_api_key: str,
+    session: requests.Session,
+    seen_ips: Set[str],
+    allowlist: "Allowlist",
+    stats: "ImportStats",
+    logger: logging.Logger,
+) -> tuple[list[str], "FetchResult"]:
+    """
+    Fetch IPs directly from AbuseIPDB's blacklist API endpoint.
+
+    Requires an API key (free tier: 1000 reports/day, 5 checks/day).
+    Returns IPs with confidence >= abuseipdb_min_confidence.
+    """
+    source = BlocklistSource(
+        name="AbuseIPDB API",
+        url="https://api.abuseipdb.com/api/v2/blacklist",
+        enabled_key="enable_abuseipdb",
+        rate_limited = True
+    )
+
+    if source.rate_limited != config.mode == "frequent" and config.mode != "all":
+        logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
+        return [], None
+
+    new_ips: list[str] = []
+    t0 = time.time()
+
+    if not abuseipdb_api_key:
+        return new_ips, FetchResult(source=source, success=True, ip_count=0)
+
+    try:
+        logger.debug(f"Fetching AbuseIPDB blacklist (confidence >= {config.abuseipdb_min_confidence}%)")
+
+        response = session.get(
+            "https://api.abuseipdb.com/api/v2/blacklist",
+            headers={
+                "Key": abuseipdb_api_key,
+                "Accept": "text/plain",
+            },
+            params={
+                "confidenceMinimum": config.abuseipdb_min_confidence,
+                "limit": config.abuseipdb_limit,
+            },
+            timeout=config.fetch_timeout,
+        )
+        response.raise_for_status()
+
+        for line in response.text.splitlines():
+            ip_str = line.strip()
+            if not ip_str or ip_str.startswith("#"):
+                continue
+
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                if is_private_or_reserved(ip):
+                    continue
+                if str(ip) in EXCLUDED_IPS:
+                    continue
+                normalized = str(ip)
+                if normalized not in seen_ips:
+                    if not allowlist.contains(normalized):
+                        seen_ips.add(normalized)
+                        new_ips.append(normalized)
+            except (ValueError, TypeError):
+                stats.parse_errors += 1
+
+        logger.debug(f"AbuseIPDB API: {len(new_ips)} unique new IPs")
+        duration = time.time() - t0
+        return new_ips, FetchResult(source=source, success=True, ip_count=len(new_ips), duration=duration)
+
+    except requests.RequestException as e:
+        duration = time.time() - t0
+        logger.warning(f"AbuseIPDB API: unavailable ({e})")
+        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
+    except Exception as e:
+        duration = time.time() - t0
+        logger.error(f"AbuseIPDB API: unexpected error ({e})")
+        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
+
 
 # =============================================================================
 # CrowdSec LAPI Client
@@ -2109,92 +2194,6 @@ def _format_generic_webhook(stats: "ImportStats") -> dict:
         "imported_failed": stats.imported_failed,
         "duration_seconds": round(stats.duration_seconds, 1),
     }
-
-
-# =============================================================================
-# AbuseIPDB Direct API
-# =============================================================================
-
-def fetch_abuseipdb_api(
-    config: Config,
-    abuseipdb_api_key: str,
-    session: requests.Session,
-    seen_ips: Set[str],
-    allowlist: "Allowlist",
-    stats: "ImportStats",
-    logger: logging.Logger,
-) -> tuple[list[str], "FetchResult"]:
-    """
-    Fetch IPs directly from AbuseIPDB's blacklist API endpoint.
-
-    Requires an API key (free tier: 1000 reports/day, 5 checks/day).
-    Returns IPs with confidence >= abuseipdb_min_confidence.
-    """
-    source = BlocklistSource(
-        name="AbuseIPDB API",
-        url="https://api.abuseipdb.com/api/v2/blacklist",
-        enabled_key="enable_abuseipdb",
-        rate_limited = True
-    )
-
-    if source.rate_limited != config.mode == "frequent" and config.mode != "all":
-        logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
-        return [], None
-
-    new_ips: list[str] = []
-    t0 = time.time()
-
-    if not abuseipdb_api_key:
-        return new_ips, FetchResult(source=source, success=True, ip_count=0)
-
-    try:
-        logger.debug(f"Fetching AbuseIPDB blacklist (confidence >= {config.abuseipdb_min_confidence}%)")
-
-        response = session.get(
-            "https://api.abuseipdb.com/api/v2/blacklist",
-            headers={
-                "Key": abuseipdb_api_key,
-                "Accept": "text/plain",
-            },
-            params={
-                "confidenceMinimum": config.abuseipdb_min_confidence,
-                "limit": config.abuseipdb_limit,
-            },
-            timeout=config.fetch_timeout,
-        )
-        response.raise_for_status()
-
-        for line in response.text.splitlines():
-            ip_str = line.strip()
-            if not ip_str or ip_str.startswith("#"):
-                continue
-
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                if is_private_or_reserved(ip):
-                    continue
-                if str(ip) in EXCLUDED_IPS:
-                    continue
-                normalized = str(ip)
-                if normalized not in seen_ips:
-                    if not allowlist.contains(normalized):
-                        seen_ips.add(normalized)
-                        new_ips.append(normalized)
-            except (ValueError, TypeError):
-                stats.parse_errors += 1
-
-        logger.debug(f"AbuseIPDB API: {len(new_ips)} unique new IPs")
-        duration = time.time() - t0
-        return new_ips, FetchResult(source=source, success=True, ip_count=len(new_ips), duration=duration)
-
-    except requests.RequestException as e:
-        duration = time.time() - t0
-        logger.warning(f"AbuseIPDB API: unavailable ({e})")
-        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
-    except Exception as e:
-        duration = time.time() - t0
-        logger.error(f"AbuseIPDB API: unexpected error ({e})")
-        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
 
 
 # =============================================================================
