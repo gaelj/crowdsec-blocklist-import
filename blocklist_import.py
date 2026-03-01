@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
-import json
 import logging
 import os
 import signal
@@ -55,20 +54,51 @@ except ImportError:
         pass
 
 __version__ = "3.5.1-alpha.3"
+
 # =============================================================================
 # Blocklist Sources
 # =============================================================================
+
+def get_normal_headers(config: Config) -> dict[str, str]:
+    return {"User-Agent": f"crowdsec-blocklist-import/{__version__}"}
+
+def get_abuseipdb_api_headers(config: Config) -> dict[str, str]:
+    return {
+        "User-Agent": f"crowdsec-blocklist-import/{__version__}",
+        "Key": config.abuseipdb_api_key,
+        "Accept": "text/plain",
+    }
+
+def get_normal_params(config: Config) -> dict[str, str]:
+    return {}
+
+def get_abuseipdb_api_params(config: Config) -> dict[str, str]:
+    return {
+        "confidenceMinimum": config.abuseipdb_min_confidence,
+        "limit": config.abuseipdb_limit,
+    }
+
+def get_normal_can_import(config: Config) -> bool:
+    return True
+
+def get_abuseipdb_api_can_import(config: Config) -> bool:
+    return config.abuseipdb_api_key is not None and config.abuseipdb_api_key != ""
 
 @dataclass
 class BlocklistSource:
     """Represents a blocklist source."""
     name: str
-    url: str
+    url: str = None
+    preset_values: list[str] = None # Can be passed, instead of URL
     enabled_key: str
     comment_char: str = "#"
     extract_field: Optional[int] = None  # Field index (0-based) to extract from lines
     field_separator: str = " "
     rate_limited: bool = False
+    api_key_name: str = None
+    get_headers: function = get_normal_headers
+    get_params: function = get_normal_params
+    get_can_import: function = get_normal_can_import
 
 # Define all blocklist sources
 BLOCKLIST_SOURCES: list[BlocklistSource] = [
@@ -245,15 +275,26 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
         enabled_key="enable_sentinel",
         extract_field=0,
         field_separator=","
-    )
-]
-
-# Static scanner IPs (Censys)
-STATIC_SCANNER_IPS: list[str] = [
-    "192.35.168.0/23",
-    "162.142.125.0/24",
-    "74.120.14.0/24",
-    "167.248.133.0/24",
+    ),
+    BlocklistSource(
+        name="AbuseIPDB API",
+        url="https://api.abuseipdb.com/api/v2/blacklist",
+        enabled_key="enable_abuseipdb",
+        rate_limited = True,
+        get_headers = get_abuseipdb_api_headers,
+        get_params = get_abuseipdb_api_params,
+        get_can_import = get_abuseipdb_api_can_import
+    ),
+    BlocklistSource(
+        name="Static scanner IPs (Censys)",
+        preset_values = [
+            "192.35.168.0/23",
+            "162.142.125.0/24",
+            "74.120.14.0/24",
+            "167.248.133.0/24",
+        ],
+        enabled_key="enable_scanners",
+    ),
 ]
 
 # =============================================================================
@@ -1288,9 +1329,6 @@ def fetch_blocklist(
     FetchResult now carries duration, error_type, error_exc and
     per-token parse_errors so MetricsCollector can record full detail.
     """
-    if (source.rate_limited != (config.mode == "limited")) and (config.mode != "all"):
-        logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
-        return [], None
 
     new_ips: list[str] = []
     t0 = time.time()
@@ -1298,11 +1336,15 @@ def fetch_blocklist(
     try:
         logger.debug(f"Fetching {source.name} from {source.url}")
 
+        headers = source.get_headers(config)
+        params = source.get_params(config)
+
         response = session.get(
             source.url,
             timeout=config.fetch_timeout,
             stream=True,
-            headers={"User-Agent": f"crowdsec-blocklist-import/{__version__}"},
+            headers=headers,
+            params=params,
         )
         response.raise_for_status()
 
@@ -1383,91 +1425,6 @@ def fetch_blocklist(
             error_type="fetch",
             error_exc=e,
         )
-
-# =============================================================================
-# AbuseIPDB Direct API
-# =============================================================================
-
-def fetch_abuseipdb_api(
-    config: Config,
-    abuseipdb_api_key: str,
-    session: requests.Session,
-    seen_ips: Set[str],
-    allowlist: "Allowlist",
-    stats: "ImportStats",
-    logger: logging.Logger,
-) -> tuple[list[str], "FetchResult"]:
-    """
-    Fetch IPs directly from AbuseIPDB's blacklist API endpoint.
-
-    Requires an API key (free tier: 1000 reports/day, 5 checks/day).
-    Returns IPs with confidence >= abuseipdb_min_confidence.
-    """
-    source = BlocklistSource(
-        name="AbuseIPDB API",
-        url="https://api.abuseipdb.com/api/v2/blacklist",
-        enabled_key="enable_abuseipdb",
-        rate_limited = True
-    )
-
-    if source.rate_limited != config.mode == "frequent" and config.mode != "all":
-        logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
-        return [], None
-
-    new_ips: list[str] = []
-    t0 = time.time()
-
-    if not abuseipdb_api_key:
-        return new_ips, FetchResult(source=source, success=True, ip_count=0)
-
-    try:
-        logger.debug(f"Fetching AbuseIPDB blacklist (confidence >= {config.abuseipdb_min_confidence}%)")
-
-        response = session.get(
-            "https://api.abuseipdb.com/api/v2/blacklist",
-            headers={
-                "Key": abuseipdb_api_key,
-                "Accept": "text/plain",
-            },
-            params={
-                "confidenceMinimum": config.abuseipdb_min_confidence,
-                "limit": config.abuseipdb_limit,
-            },
-            timeout=config.fetch_timeout,
-        )
-        response.raise_for_status()
-
-        for line in response.text.splitlines():
-            ip_str = line.strip()
-            if not ip_str or ip_str.startswith("#"):
-                continue
-
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                if is_private_or_reserved(ip):
-                    continue
-                if str(ip) in EXCLUDED_IPS:
-                    continue
-                normalized = str(ip)
-                if normalized not in seen_ips:
-                    if not allowlist.contains(normalized):
-                        seen_ips.add(normalized)
-                        new_ips.append(normalized)
-            except (ValueError, TypeError):
-                stats.parse_errors += 1
-
-        logger.debug(f"AbuseIPDB API: {len(new_ips)} unique new IPs")
-        duration = time.time() - t0
-        return new_ips, FetchResult(source=source, success=True, ip_count=len(new_ips), duration=duration)
-
-    except requests.RequestException as e:
-        duration = time.time() - t0
-        logger.warning(f"AbuseIPDB API: unavailable ({e})")
-        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
-    except Exception as e:
-        duration = time.time() - t0
-        logger.error(f"AbuseIPDB API: unexpected error ({e})")
-        return new_ips, FetchResult(source=source, success=False, duration=duration, error_type="fetch", error_exc=e)
 
 
 # =============================================================================
@@ -1801,6 +1758,10 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         logger=logger,
     )
 
+    if config.abuseipdb_api_key_file:
+        config.abuseipdb_api_key = read_secret_file(config.abuseipdb_api_key_file)
+        logger.debug(f"Read Abuse IP DB key from {config.abuseipdb_api_key_file}")
+
     # Check LAPI connectivity (unless dry run)
     if not config.dry_run:
         # Need either bouncer key (for reading) or machine creds (for writing)
@@ -1846,7 +1807,12 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
     if config.custom_block_lists:
         for i, url in enumerate(config.custom_block_lists):
             if url:
-                enabled_sources.append(BlocklistSource(f"custom_blocklist_{i}", url, "custom_blocklists"))
+                if (source.rate_limited != (config.mode == "limited")) and (config.mode != "all"):
+                    logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
+                elif not source.get_can_import(config):
+                    logger.debug(f"No API Key: ignoring source {source.name}")
+                else:
+                    enabled_sources.append(BlocklistSource(f"custom_blocklist_{i}", url, "custom_blocklists"))
 
     logger.info(f"Fetching from {len(enabled_sources)} enabled blocklist sources...")
 
@@ -1899,15 +1865,24 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         batch_cnt = 1
         log_separator(logger)
         # Fetch blocklist and get results
-        new_ips, result = fetch_blocklist(
-            session=session,
-            source=source,
-            config=config,
-            seen_ips=seen_ips,
-            allowlist=allowlist,
-            stats=stats,
-            logger=logger,
-        )
+        if source.preset_values:
+            new_ips, result = source.preset_values, FetchResult(
+                source=source,
+                success=True,
+                ip_count=len(source.preset_values),
+                duration=0,
+                parse_errors={},
+            )
+        else:
+            new_ips, result = fetch_blocklist(
+                session=session,
+                source=source,
+                config=config,
+                seen_ips=seen_ips,
+                allowlist=allowlist,
+                stats=stats,
+                logger=logger,
+            )
 
         if result:
             # --- Update per-source metrics immediately after fetch ---
@@ -1952,76 +1927,6 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
             source_failed += failed
             log_batch_stats(source_ok, source_failed, batch_cnt)
 
-    # Static scanner IPs (Censys)
-    log_separator(logger)
-    if config.enable_scanners:
-        logger.debug("Adding static scanner IPs (Censys)")
-        t0 = time.time()
-        added = 0
-        for cidr in STATIC_SCANNER_IPS:
-            if cidr not in seen_ips:
-                seen_ips.add(cidr)
-                batch.append(cidr)
-                stats.new_ips += 1
-                stats.total_ips_fetched += 1
-                added += 1
-        stats.sources_ok += 1
-        ok, failed = flush_batch("Censys")
-        log_batch_stats(ok, failed, 1)
-        if metrics:
-            metrics.record_source_success("Censys", added, time.time() - t0)
-
-    # Fetch AbuseIPDB direct API (if API key is configured)
-    abuseipdb_api_key = config.abuseipdb_api_key
-    if config.abuseipdb_api_key_file:
-        abuseipdb_api_key = read_secret_file(config.abuseipdb_api_key_file)
-        logger.debug(f"Read Abuse IP DB key from {config.abuseipdb_api_key_file}")
-    if abuseipdb_api_key and config.enable_abuseipdb:
-        log_separator(logger)
-        abuseipdb_ips, abuseipdb_result = fetch_abuseipdb_api(
-            config=config,
-            abuseipdb_api_key=abuseipdb_api_key,
-            session=session,
-            seen_ips=seen_ips,
-            allowlist=allowlist,
-            stats=stats,
-            logger=logger,
-        )
-
-        if abuseipdb_result:
-            # --- Update per-source metrics immediately after fetch ---
-            if metrics:
-                if abuseipdb_result.success:
-                    metrics.record_source_success(
-                        source_name="AbuseIPDB API",
-                        ip_count=abuseipdb_result.ip_count,
-                        duration=abuseipdb_result.duration,
-                    )
-                    if abuseipdb_result.parse_errors:
-                        metrics.record_parse_errors("AbuseIPDB API", abuseipdb_result.parse_errors)
-                else:
-                    metrics.record_source_failure(
-                        source_name="AbuseIPDB API",
-                        error_type=abuseipdb_result.error_type or "fetch",
-                        exc=abuseipdb_result.error_exc,
-                        duration=abuseipdb_result.duration,
-                    )
-
-            if abuseipdb_result.success:
-                stats.sources_ok += 1
-            else:
-                stats.sources_failed += 1
-
-            stats.total_ips_fetched += len(abuseipdb_ips)
-            stats.new_ips += len(abuseipdb_ips)
-
-            for ip in abuseipdb_ips:
-                batch.append(ip)
-                if len(batch) >= config.batch_size:
-                    ok, failed = flush_batch("AbuseIPDB API")
-                    log_batch_stats(ok, failed, 1)
-            ok, failed = flush_batch("AbuseIPDB API")
-            log_batch_stats(ok, failed, 1)
 
     stats.duration_seconds = time.time() - start_time
 
