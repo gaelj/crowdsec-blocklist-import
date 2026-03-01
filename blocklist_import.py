@@ -55,34 +55,213 @@ except ImportError:
         pass
 
 __version__ = "3.5.1-alpha.3"
+# =============================================================================
+# Blocklist Sources
+# =============================================================================
+
+@dataclass
+class BlocklistSource:
+    """Represents a blocklist source."""
+    name: str
+    url: str
+    enabled_key: str
+    comment_char: str = "#"
+    extract_field: Optional[int] = None  # Field index (0-based) to extract from lines
+    field_separator: str = " "
+    rate_limited: bool = False
+
+# Define all blocklist sources
+BLOCKLIST_SOURCES: list[BlocklistSource] = [
+    # IPsum - aggregated threat intel (level 3+ = on 3+ lists)
+    BlocklistSource(
+        name="IPsum",
+        url="https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt",
+        enabled_key="enable_ipsum",
+    ),
+    # Spamhaus DROP
+    BlocklistSource(
+        name="Spamhaus DROP",
+        url="https://www.spamhaus.org/drop/drop.txt",
+        enabled_key="enable_spamhaus",
+        comment_char=";",
+        extract_field=0,
+    ),
+    # Blocklist.de
+    BlocklistSource(
+        name="Blocklist.de all",
+        url="https://lists.blocklist.de/lists/all.txt",
+        enabled_key="enable_blocklist_de",
+    ),
+    BlocklistSource(
+        name="Blocklist.de SSH",
+        url="https://lists.blocklist.de/lists/ssh.txt",
+        enabled_key="enable_blocklist_de",
+    ),
+    BlocklistSource(
+        name="Blocklist.de Apache",
+        url="https://lists.blocklist.de/lists/apache.txt",
+        enabled_key="enable_blocklist_de",
+    ),
+    BlocklistSource(
+        name="Blocklist.de mail",
+        url="https://lists.blocklist.de/lists/mail.txt",
+        enabled_key="enable_blocklist_de",
+    ),
+    # Firehol
+    BlocklistSource(
+        name="Firehol level1",
+        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset",
+        enabled_key="enable_firehol",
+    ),
+    BlocklistSource(
+        name="Firehol level2",
+        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset",
+        enabled_key="enable_firehol",
+    ),
+    # Abuse.ch
+    BlocklistSource(
+        name="Feodo Tracker",
+        url="https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+        enabled_key="enable_abuse_ch",
+    ),
+    BlocklistSource(
+        name="URLhaus",
+        url="https://urlhaus.abuse.ch/downloads/text_online/",
+        enabled_key="enable_abuse_ch",
+    ),
+    # Other sources
+    BlocklistSource(
+        name="Emerging Threats",
+        url="https://rules.emergingthreats.net/blockrules/compromised-ips.txt",
+        enabled_key="enable_emerging_threats",
+    ),
+    BlocklistSource(
+        name="Binary Defense",
+        url="https://www.binarydefense.com/banlist.txt",
+        enabled_key="enable_binary_defense",
+    ),
+    BlocklistSource(
+        name="Bruteforce Blocker",
+        url="https://danger.rulez.sk/projects/bruteforceblocker/blist.php",
+        enabled_key="enable_bruteforce_blocker",
+    ),
+    BlocklistSource(
+        name="DShield",
+        url="https://www.dshield.org/block.txt",
+        enabled_key="enable_dshield",
+        extract_field=0,
+    ),
+    BlocklistSource(
+        name="CI Army",
+        url="https://cinsscore.com/list/ci-badguys.txt",
+        enabled_key="enable_ci_army",
+    ),
+    BlocklistSource(
+        name="Botvrij",
+        url="https://www.botvrij.eu/data/ioclist.ip-dst.raw",
+        enabled_key="enable_botvrij",
+    ),
+    BlocklistSource(
+        name="GreenSnow",
+        url="https://blocklist.greensnow.co/greensnow.txt",
+        enabled_key="enable_greensnow",
+    ),
+    BlocklistSource(
+        name="StopForumSpam",
+        url="https://www.stopforumspam.com/downloads/toxic_ip_cidr.txt",
+        enabled_key="enable_stopforumspam",
+    ),
+    # Tor exit nodes
+    BlocklistSource(
+        name="Tor exit nodes",
+        url="https://check.torproject.org/torbulkexitlist",
+        enabled_key="enable_tor",
+    ),
+    BlocklistSource(
+        name="Tor (dan.me.uk)",
+        url="https://www.dan.me.uk/torlist/?exit",
+        enabled_key="enable_tor",
+        rate_limited = True,
+    ),
+    # Scanners
+    BlocklistSource(
+        name="Shodan scanners",
+        url="https://gist.githubusercontent.com/jfqd/4ff7fa70950626a11832a4bc39451c1c/raw",
+        enabled_key="enable_scanners",
+    ),
+    # AbuseIPDB 99% confidence (via borestad mirror)
+    BlocklistSource(
+        name="AbuseIPDB",
+        url="https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-1d.ipv4",
+        enabled_key="enable_abuseipdb",
+    ),
+    # Cybercrime Tracker C2 (FireHOL mirror)
+    BlocklistSource(
+        name="Cybercrime Tracker",
+        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/cybercrime.ipset",
+        enabled_key="enable_cybercrime_tracker",
+    ),
+    # Monty Security C2 Tracker
+    BlocklistSource(
+        name="Monty Security C2",
+        url="https://raw.githubusercontent.com/montysecurity/C2-Tracker/main/data/all.txt",
+        enabled_key="enable_monty_security_c2",
+    ),
+    # DShield Top Attackers
+    BlocklistSource(
+        name="DShield Top Attackers",
+        url="https://feeds.dshield.org/top10-2.txt",
+        enabled_key="enable_dshield",
+        extract_field=0,
+    ),
+    # VXVault Malware (FireHOL mirror)
+    BlocklistSource(
+        name="VXVault",
+        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/vxvault.ipset",
+        enabled_key="enable_vxvault",
+    ),
+    # --- Tier 2 Extended Coverage Blocklists ---
+    # IPsum Level 4+ (higher confidence than existing level 3)
+    BlocklistSource(
+        name="IPsum level4",
+        url="https://raw.githubusercontent.com/stamparm/ipsum/master/levels/4.txt",
+        enabled_key="enable_ipsum",
+    ),
+    # Firehol Level 3 (extended 30-day coverage)
+    BlocklistSource(
+        name="Firehol level3",
+        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level3.netset",
+        enabled_key="enable_firehol",
+    ),
+    # Maltrail mass scanners
+    BlocklistSource(
+        name="Maltrail scanners",
+        url="https://raw.githubusercontent.com/stamparm/maltrail/master/trails/static/mass_scanner.txt",
+        enabled_key="enable_scanners",
+    ),
+    BlocklistSource(
+        name="Sentinel",
+        url="https://view.sentinel.turris.cz/greylist-data/greylist-latest.csv",
+        enabled_key="enable_sentinel",
+        extract_field=0,
+        field_separator=","
+    )
+]
+
+# Static scanner IPs (Censys)
+STATIC_SCANNER_IPS: list[str] = [
+    "192.35.168.0/23",
+    "162.142.125.0/24",
+    "74.120.14.0/24",
+    "167.248.133.0/24",
+]
 
 # =============================================================================
 # Environment Variable Validation
 # =============================================================================
 
 # All valid ENABLE_* environment variable names (canonical list)
-VALID_ENABLE_VARS: set[str] = {
-    "ENABLE_IPSUM",
-    "ENABLE_SPAMHAUS",
-    "ENABLE_BLOCKLIST_DE",
-    "ENABLE_FIREHOL",
-    "ENABLE_ABUSE_CH",
-    "ENABLE_EMERGING_THREATS",
-    "ENABLE_BINARY_DEFENSE",
-    "ENABLE_BRUTEFORCE_BLOCKER",
-    "ENABLE_DSHIELD",
-    "ENABLE_CI_ARMY",
-    "ENABLE_BOTVRIJ",
-    "ENABLE_GREENSNOW",
-    "ENABLE_STOPFORUMSPAM",
-    "ENABLE_TOR",
-    "ENABLE_SCANNERS",
-    "ENABLE_ABUSE_IPDB",
-    "ENABLE_CYBERCRIME_TRACKER",
-    "ENABLE_MONTY_SECURITY_C2",
-    "ENABLE_VXVAULT",
-    "ENABLE_SENTINEL",
-}
+VALID_ENABLE_VARS: set[str] = set([ s.enabled_key.upper() for s in BLOCKLIST_SOURCES ])
 
 # Valid boolean string values (case-insensitive)
 VALID_BOOL_VALUES: set[str] = {"true", "false", "1", "0", "yes", "no", "on", "off"}
@@ -340,208 +519,6 @@ class Config:
             enable_vxvault=get_bool("ENABLE_VXVAULT"),
             enable_sentinel=get_bool("ENABLE_SENTINEL")
         )
-
-
-# =============================================================================
-# Blocklist Sources
-# =============================================================================
-
-@dataclass
-class BlocklistSource:
-    """Represents a blocklist source."""
-    name: str
-    url: str
-    enabled_key: str
-    comment_char: str = "#"
-    extract_field: Optional[int] = None  # Field index (0-based) to extract from lines
-    field_separator: str = " "
-    rate_limited: bool = False
-
-# Define all blocklist sources
-BLOCKLIST_SOURCES: list[BlocklistSource] = [
-    # IPsum - aggregated threat intel (level 3+ = on 3+ lists)
-    BlocklistSource(
-        name="IPsum",
-        url="https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt",
-        enabled_key="enable_ipsum",
-    ),
-    # Spamhaus DROP
-    BlocklistSource(
-        name="Spamhaus DROP",
-        url="https://www.spamhaus.org/drop/drop.txt",
-        enabled_key="enable_spamhaus",
-        comment_char=";",
-        extract_field=0,
-    ),
-    # Blocklist.de
-    BlocklistSource(
-        name="Blocklist.de all",
-        url="https://lists.blocklist.de/lists/all.txt",
-        enabled_key="enable_blocklist_de",
-    ),
-    BlocklistSource(
-        name="Blocklist.de SSH",
-        url="https://lists.blocklist.de/lists/ssh.txt",
-        enabled_key="enable_blocklist_de",
-    ),
-    BlocklistSource(
-        name="Blocklist.de Apache",
-        url="https://lists.blocklist.de/lists/apache.txt",
-        enabled_key="enable_blocklist_de",
-    ),
-    BlocklistSource(
-        name="Blocklist.de mail",
-        url="https://lists.blocklist.de/lists/mail.txt",
-        enabled_key="enable_blocklist_de",
-    ),
-    # Firehol
-    BlocklistSource(
-        name="Firehol level1",
-        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset",
-        enabled_key="enable_firehol",
-    ),
-    BlocklistSource(
-        name="Firehol level2",
-        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset",
-        enabled_key="enable_firehol",
-    ),
-    # Abuse.ch
-    BlocklistSource(
-        name="Feodo Tracker",
-        url="https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
-        enabled_key="enable_abuse_ch",
-    ),
-    BlocklistSource(
-        name="URLhaus",
-        url="https://urlhaus.abuse.ch/downloads/text_online/",
-        enabled_key="enable_abuse_ch",
-    ),
-    # Other sources
-    BlocklistSource(
-        name="Emerging Threats",
-        url="https://rules.emergingthreats.net/blockrules/compromised-ips.txt",
-        enabled_key="enable_emerging_threats",
-    ),
-    BlocklistSource(
-        name="Binary Defense",
-        url="https://www.binarydefense.com/banlist.txt",
-        enabled_key="enable_binary_defense",
-    ),
-    BlocklistSource(
-        name="Bruteforce Blocker",
-        url="https://danger.rulez.sk/projects/bruteforceblocker/blist.php",
-        enabled_key="enable_bruteforce_blocker",
-    ),
-    BlocklistSource(
-        name="DShield",
-        url="https://www.dshield.org/block.txt",
-        enabled_key="enable_dshield",
-        extract_field=0,
-    ),
-    BlocklistSource(
-        name="CI Army",
-        url="https://cinsscore.com/list/ci-badguys.txt",
-        enabled_key="enable_ci_army",
-    ),
-    BlocklistSource(
-        name="Botvrij",
-        url="https://www.botvrij.eu/data/ioclist.ip-dst.raw",
-        enabled_key="enable_botvrij",
-    ),
-    BlocklistSource(
-        name="GreenSnow",
-        url="https://blocklist.greensnow.co/greensnow.txt",
-        enabled_key="enable_greensnow",
-    ),
-    BlocklistSource(
-        name="StopForumSpam",
-        url="https://www.stopforumspam.com/downloads/toxic_ip_cidr.txt",
-        enabled_key="enable_stopforumspam",
-    ),
-    # Tor exit nodes
-    BlocklistSource(
-        name="Tor exit nodes",
-        url="https://check.torproject.org/torbulkexitlist",
-        enabled_key="enable_tor",
-    ),
-    BlocklistSource(
-        name="Tor (dan.me.uk)",
-        url="https://www.dan.me.uk/torlist/?exit",
-        enabled_key="enable_tor",
-        rate_limited = True,
-    ),
-    # Scanners
-    BlocklistSource(
-        name="Shodan scanners",
-        url="https://gist.githubusercontent.com/jfqd/4ff7fa70950626a11832a4bc39451c1c/raw",
-        enabled_key="enable_scanners",
-    ),
-    # AbuseIPDB 99% confidence (via borestad mirror)
-    BlocklistSource(
-        name="AbuseIPDB",
-        url="https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-1d.ipv4",
-        enabled_key="enable_abuseipdb",
-    ),
-    # Cybercrime Tracker C2 (FireHOL mirror)
-    BlocklistSource(
-        name="Cybercrime Tracker",
-        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/cybercrime.ipset",
-        enabled_key="enable_cybercrime_tracker",
-    ),
-    # Monty Security C2 Tracker
-    BlocklistSource(
-        name="Monty Security C2",
-        url="https://raw.githubusercontent.com/montysecurity/C2-Tracker/main/data/all.txt",
-        enabled_key="enable_monty_security_c2",
-    ),
-    # DShield Top Attackers
-    BlocklistSource(
-        name="DShield Top Attackers",
-        url="https://feeds.dshield.org/top10-2.txt",
-        enabled_key="enable_dshield",
-        extract_field=0,
-    ),
-    # VXVault Malware (FireHOL mirror)
-    BlocklistSource(
-        name="VXVault",
-        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/vxvault.ipset",
-        enabled_key="enable_vxvault",
-    ),
-    # --- Tier 2 Extended Coverage Blocklists ---
-    # IPsum Level 4+ (higher confidence than existing level 3)
-    BlocklistSource(
-        name="IPsum level4",
-        url="https://raw.githubusercontent.com/stamparm/ipsum/master/levels/4.txt",
-        enabled_key="enable_ipsum",
-    ),
-    # Firehol Level 3 (extended 30-day coverage)
-    BlocklistSource(
-        name="Firehol level3",
-        url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level3.netset",
-        enabled_key="enable_firehol",
-    ),
-    # Maltrail mass scanners
-    BlocklistSource(
-        name="Maltrail scanners",
-        url="https://raw.githubusercontent.com/stamparm/maltrail/master/trails/static/mass_scanner.txt",
-        enabled_key="enable_scanners",
-    ),
-    BlocklistSource(
-        name="Sentinel",
-        url="https://view.sentinel.turris.cz/greylist-data/greylist-latest.csv",
-        enabled_key="enable_sentinel",
-        extract_field=0,
-        field_separator=","
-    )
-]
-
-# Static scanner IPs (Censys)
-STATIC_SCANNER_IPS: list[str] = [
-    "192.35.168.0/23",
-    "162.142.125.0/24",
-    "74.120.14.0/24",
-    "167.248.133.0/24",
-]
 
 
 def list_blocklist_sources(logger: logging.Logger) -> None:
