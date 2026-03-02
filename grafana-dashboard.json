@@ -61,7 +61,7 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4.8,
+        "w": 4,
         "x": 0,
         "y": 1
       },
@@ -124,8 +124,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4.8,
-        "x": 4.8,
+        "w": 4,
+        "x": 4,
         "y": 1
       },
       "id": 2,
@@ -172,6 +172,69 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 301,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "blocklist_import_refreshed_ips",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Refreshed IPs (last run)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
           "max": 1,
           "min": 0,
           "thresholds": {
@@ -197,8 +260,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4.8,
-        "x": 9.6,
+        "w": 4,
+        "x": 12,
         "y": 1
       },
       "id": 3,
@@ -268,8 +331,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4.8,
-        "x": 14.4,
+        "w": 4,
+        "x": 16,
         "y": 1
       },
       "id": 4,
@@ -339,8 +402,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4.8,
-        "x": 19.2,
+        "w": 4,
+        "x": 20,
         "y": 1
       },
       "id": 9,
@@ -493,6 +556,17 @@
           "legendFormat": "New IPs",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "blocklist_import_refreshed_ips",
+          "instant": false,
+          "legendFormat": "Refreshed IPs",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "IPs Imported Per Run",
