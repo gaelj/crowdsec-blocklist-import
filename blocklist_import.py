@@ -701,7 +701,8 @@ class MetricsCollector:
       - blocklist_import_source_status{source}
             Gauge: 1 = success, 0 = failed.
             Success/failure is encoded as the *value*, not a label (issue #4).
-      - blocklist_import_source_ips{source}               IPs fetched per source
+      - blocklist_import_source_ips{source}               new IPs fetched per source
+      - blocklist_import_source_refreshed_ips{source}     refreshed IPs fetched per source
       - blocklist_import_source_duration_seconds{source}  fetch time per source
       - blocklist_import_errors_total{error_type, source, message}
             error_type: "fetch" | "parse" | "import" | "encoding"  (issue #5)
@@ -836,6 +837,13 @@ class MetricsCollector:
             registry=self.registry,
         )
 
+        self.source_refreshed_ips = Gauge( # type: ignore
+            "blocklist_import_source_refreshed_ips",
+            "Number of unique refreshed IPs fetched from each source in the last run",
+            ["source"],
+            registry=self.registry,
+            )
+
         self.source_duration_seconds = Gauge( # type: ignore
             "blocklist_import_source_duration_seconds",
             "Time taken to fetch and parse each source (seconds)",
@@ -847,12 +855,13 @@ class MetricsCollector:
     # Per-source helpers — called directly from fetch_blocklist / run_import
     # ------------------------------------------------------------------
 
-    def record_source_success(self, source_name: str, ip_count: int, duration_sec: float) -> None:
+    def record_source_success(self, source_name: str, new_ip_count: int, refreshed_ip_count: int, duration_sec: float) -> None:
         """Record a successful source fetch."""
         if not PROMETHEUS_AVAILABLE or not self.pushgateway_url:
             return
         self.source_status.labels(source=source_name).set(1)
-        self.source_ips.labels(source=source_name).set(ip_count)
+        self.source_ips.labels(source=source_name).set(new_ip_count)
+        self.source_refreshed_ips.labels(source=source_name).set(refreshed_ip_count)
         self.source_duration_seconds.labels(source=source_name).set(duration_sec)
 
     def record_source_failure(self, source_name: str, error_type: str,
@@ -867,6 +876,7 @@ class MetricsCollector:
             return
         self.source_status.labels(source=source_name).set(0)
         self.source_ips.labels(source=source_name).set(0)
+        self.source_refreshed_ips.labels(source=source_name).set(0)
         self.source_duration_seconds.labels(source=source_name).set(duration)
         short_msg = sanitize_error_message(exc) if isinstance(exc, Exception) else (str(exc)[:64] if exc else "unknown")
         self.errors_total.labels(
@@ -1456,15 +1466,16 @@ def fetch_blocklist(
                             total_imported_unique_ip_cnt += 1
                             new_ips.append(ip)
 
-        logger.debug(f"Applying allow-list...")
+        logger.debug(f"Applying allow-list to new IPs...")
+        allowed_new_ips = [ip for ip in new_ips if not allowlist.contains(ip)]
 
-        refresh_ips2 = [ip for ip in refresh_ips if not allowlist.contains(ip)]
-        new_ips2 = [ip for ip in new_ips if not allowlist.contains(ip)]
+        logger.debug(f"Applying allow-list to refreshed IPs...")
+        allowed_refresh_ips = [ip for ip in refresh_ips if not allowlist.contains(ip)]
 
-        ignored_white_listed_ip_cnt = len(refresh_ips) - len(refresh_ips2) + len(new_ips) - len(new_ips2)
+        ignored_white_listed_ip_cnt = len(refresh_ips) - len(allowed_refresh_ips) + len(new_ips) - len(allowed_new_ips)
 
-        refresh_ips = refresh_ips2
-        new_ips = new_ips2
+        refresh_ips = allowed_refresh_ips
+        new_ips = allowed_new_ips
 
         new_ip_cnt = len(new_ips)
 
@@ -1486,7 +1497,7 @@ def fetch_blocklist(
         logger.debug(
             f"{source.name}: "
             f"{total_raw_ip_cnt} total IPs, "
-            f"{total_imported_unique_ip_cnt} imported IPs"
+            f"{total_imported_unique_ip_cnt} processed IPs"
             f"{error_cnt}, "
             f"{ignored_ips}"
             f"{new_ip_cnt} unique new IPs, "
@@ -2008,7 +2019,8 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                 if result.success:
                     metrics.record_source_success(
                         source_name=source.name,
-                        ip_count=result.new_unique_ip_count,
+                        new_ip_count=result.new_unique_ip_count,
+                        refreshed_ip_count=result.refreshed_unique_ip_count,
                         duration_sec=result.duration,
                     )
                     if result.parse_errors:
