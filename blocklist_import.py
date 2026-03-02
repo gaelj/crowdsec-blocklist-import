@@ -724,7 +724,7 @@ class MetricsCollector:
         # Fresh registry per run — prevents stale label combinations from
         # lingering in the Pushgateway across runs (issue #6).
 
-        if not PROMETHEUS_AVAILABLE:
+        if not PROMETHEUS_AVAILABLE or not self.pushgateway_url:
             self.logger.warning(
                 "prometheus-client not installed. Metrics disabled. "
                 "Install with: pip install prometheus-client"
@@ -737,6 +737,12 @@ class MetricsCollector:
         self.total_ips = Gauge( # type: ignore
             "blocklist_import_total_ips",
             "Total number of IPs imported in the last run",
+            registry=self.registry,
+        )
+
+        self.new_ips = Gauge( # type: ignore
+            "blocklist_import_new_ips",
+            "Number of new unique IPs added in the last run",
             registry=self.registry,
         )
 
@@ -780,7 +786,7 @@ class MetricsCollector:
             registry=self.registry,
         )
 
-        self.sources_successful = Gauge( # type: ignore
+        self.sources_ok = Gauge( # type: ignore
             "blocklist_import_sources_successful",
             "Number of sources successfully fetched in the last run",
             registry=self.registry,
@@ -795,12 +801,6 @@ class MetricsCollector:
         self.existing_decisions = Gauge( # type: ignore
             "blocklist_import_existing_decisions",
             "Number of existing CrowdSec decisions found",
-            registry=self.registry,
-        )
-
-        self.new_ips = Gauge( # type: ignore
-            "blocklist_import_new_ips",
-            "Number of new unique IPs added in the last run",
             registry=self.registry,
         )
 
@@ -840,13 +840,13 @@ class MetricsCollector:
     # Per-source helpers — called directly from fetch_blocklist / run_import
     # ------------------------------------------------------------------
 
-    def record_source_success(self, source_name: str, ip_count: int, duration: float) -> None:
+    def record_source_success(self, source_name: str, ip_count: int, duration_sec: float) -> None:
         """Record a successful source fetch."""
-        if not PROMETHEUS_AVAILABLE:
+        if not PROMETHEUS_AVAILABLE or not self.pushgateway_url:
             return
         self.source_status.labels(source=source_name).set(1)
         self.source_ips.labels(source=source_name).set(ip_count)
-        self.source_duration_seconds.labels(source=source_name).set(duration)
+        self.source_duration_seconds.labels(source=source_name).set(duration_sec)
 
     def record_source_failure(self, source_name: str, error_type: str,
                               exc: Optional[Exception], duration: float) -> None:
@@ -856,7 +856,7 @@ class MetricsCollector:
         exc is sanitized to a fixed category string before being stored as a
         label value — never use str(exc) directly (issue #3).
         """
-        if not PROMETHEUS_AVAILABLE:
+        if not PROMETHEUS_AVAILABLE or not self.pushgateway_url:
             return
         self.source_status.labels(source=source_name).set(0)
         self.source_ips.labels(source=source_name).set(0)
@@ -875,7 +875,7 @@ class MetricsCollector:
         Bad token strings are truncated to 64 chars. Unlike exception
         messages, parse tokens are naturally bounded per source.
         """
-        if not PROMETHEUS_AVAILABLE or not errors:
+        if not PROMETHEUS_AVAILABLE or not self.pushgateway_url or not errors:
             return
         for bad_token, count in errors.items():
             short_token = bad_token[:120]
@@ -892,7 +892,7 @@ class MetricsCollector:
         Previously these were tracked in ImportStats and logged but never
         surfaced in Prometheus. Now visible as blocklist_import_encoding_errors_total.
         """
-        if not PROMETHEUS_AVAILABLE or count == 0:
+        if not PROMETHEUS_AVAILABLE or not self.pushgateway_url or count == 0:
             return
         self.encoding_errors_total.set(count)
 
@@ -902,17 +902,20 @@ class MetricsCollector:
 
     def update_aggregates(self, stats: "ImportStats", enabled_count: int) -> None:
         """Update scalar/aggregate gauges at end of run."""
-        if not PROMETHEUS_AVAILABLE:
+        if not PROMETHEUS_AVAILABLE or not self.pushgateway_url:
             return
-        self.total_ips.set(stats.imported_ok)
+        self.total_ips.set(stats.total_ips)
         self.new_ips.set(stats.new_ips)
-        self.last_run_timestamp.set(time.time())
-        self.sources_enabled.set(enabled_count)
-        self.sources_successful.set(stats.sources_ok)
-        self.sources_failed.set(stats.sources_failed)
-        self.existing_decisions.set(stats.existing_skipped)
         self.refreshed_ips.set(stats.refreshed_ips)
+        self.last_run_timestamp.set(time.time())
+
+        self.sources_enabled.set(enabled_count)
+        self.sources_ok.set(stats.sources_ok)
+        self.sources_failed.set(stats.sources_failed)
+
+        self.existing_decisions.set(stats.existing_skipped)
         self.duration_seconds.observe(stats.duration_seconds)
+
         self.record_encoding_errors(stats.encoding_errors)
 
     def push(self) -> bool:
@@ -1475,19 +1478,23 @@ def fetch_blocklist(
             parse_errors=parse_errors,
         )
 
-    except requests.RequestException as e:
-        duration = time.time() - t0
-        logger.warning(f"{source.name}: unavailable ({e})")
-        return new_ips, FetchResult(
-            source=source,
-            success=False,
-            duration=duration,
-            error_type="fetch",
-            error_exception=e,
-        )
+    # except requests.RequestException as e:
+    #     duration = time.time() - t0
+    #     logger.warning(f"{source.name}: unavailable ({e})")
+    #     return new_ips, FetchResult(
+    #         source=source,
+    #         success=False,
+    #         duration=duration,
+    #         error_type="fetch",
+    #         error_exception=e,
+    #     )
+
     except Exception as e:
+        if isinstance(e , requests.RequestException):
+            logger.warning(f"{source.name}: unavailable ({e})")
+        else:
+            logger.error(f"{source.name}: unexpected error ({e})")
         duration = time.time() - t0
-        logger.error(f"{source.name}: unexpected error ({e})")
         return new_ips, FetchResult(
             source=source,
             success=False,
@@ -1753,11 +1760,14 @@ class ImportStats:
     """Statistics from the import run."""
     sources_ok: int = 0
     sources_failed: int = 0
-    total_ips_fetched: int = 0
+
+    total_ips: int = 0
     encoding_errors: int = 0
     parse_errors: int = 0
+
     new_ips: int = 0
     refreshed_ips: int = 0
+
     imported_ok: int = 0
     imported_failed: int = 0
     existing_skipped: int = 0
@@ -1983,7 +1993,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                     metrics.record_source_success(
                         source_name=source.name,
                         ip_count=result.new_ip_count,
-                        duration=result.duration,
+                        duration_sec=result.duration,
                     )
                     if result.parse_errors:
                         metrics.record_parse_errors(source.name, result.parse_errors)
@@ -2001,7 +2011,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                 stats.sources_failed += 1
 
             # Add IPs to batch
-            stats.total_ips_fetched += len(new_ips)
+            stats.total_ips += len(new_ips)
             stats.new_ips += len(new_ips)
 
             for ip in new_ips:
@@ -2478,7 +2488,7 @@ def _run_daemon(config: Config, logger: logging.Logger) -> int:
     """Run in daemon mode: repeat imports on a fixed interval."""
     shutdown = False
 
-    def _signal_handler(signum: object, frame: object):
+    def _signal_handler(signum: object, _: object):
         nonlocal shutdown
         logger.info(f"Received signal {signum}, shutting down after current run...")
         shutdown = True
