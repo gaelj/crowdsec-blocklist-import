@@ -1425,7 +1425,7 @@ def fetch_blocklist(
 
         new_ips: list[str] = []
 
-        non_expiring_seen_ips = non_expiring_known_ips.copy()
+        non_expiring_seen_ips = set(non_expiring_known_ips.copy())
 
         logger.debug(f"Parsing...")
         for raw_line in response.iter_lines():
@@ -1446,17 +1446,25 @@ def fetch_blocklist(
                 for ip in extract_ips_from_line(line, parse_errors, source):
                     total_raw_ip_cnt += 1
                     if ip not in non_expiring_seen_ips:
-                        non_expiring_seen_ips.append(ip)
+                        non_expiring_seen_ips.add(ip)
                         seen_ips.append((ip, decision_duration))
-                        if allowlist.contains(ip):
-                            ignored_white_listed_ip_cnt += 1
-                        elif ip in expiring_known_ips:
+                        if ip in expiring_known_ips:
                             refreshed_ip_cnt += 1
                             total_imported_unique_ip_cnt += 1
                             refresh_ips.append(ip)
                         else:
                             total_imported_unique_ip_cnt += 1
                             new_ips.append(ip)
+
+        logger.debug(f"Applying allow-list...")
+
+        refresh_ips2 = [ip for ip in refresh_ips if not allowlist.contains(ip)]
+        new_ips2 = [ip for ip in new_ips if not allowlist.contains(ip)]
+
+        ignored_white_listed_ip_cnt = len(refresh_ips) - len(refresh_ips2) + len(new_ips) - len(new_ips2)
+
+        refresh_ips = refresh_ips2
+        new_ips = new_ips2
 
         new_ip_cnt = len(new_ips)
 
