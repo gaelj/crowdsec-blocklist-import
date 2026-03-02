@@ -32,7 +32,7 @@ import re
 import signal
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from types import FunctionType
 from typing import Generator, Optional, Set
@@ -1367,7 +1367,7 @@ class FetchResult:
     duration: float = 0.0
     error_type: str = ""                    # "fetch" | "parse" | "import" | "encoding"
     error_exception: Optional[Exception] = None   # original exception (sanitized before use as label)
-    parse_errors: dict[str, int] = {}
+    parse_errors: dict[str, int] = field(default_factory=dict[str, int])
 
 
 def log_separator(logger: logging.Logger):
@@ -1379,12 +1379,12 @@ def fetch_blocklist(
     source: BlocklistSource,
     config: Config,
     seen_ips: list[tuple[str, timedelta]],
-    all_known_ips: set[str],
+    all_known_ips_set: set[str],
     expiring_known_ips: list[str],
     allowlist: Allowlist,
     stats: "ImportStats",
     logger: logging.Logger,
-) -> tuple[list[str], FetchResult]:
+) -> tuple[list[str], list[str], FetchResult]:
     """
     Fetch and parse a single blocklist source.
 
@@ -1394,6 +1394,7 @@ def fetch_blocklist(
     """
 
     new_ips: list[str] = []
+    refreshed_ips_list: list[str] = []
     t0 = time.time()
 
     try:
@@ -1413,7 +1414,7 @@ def fetch_blocklist(
 
         # Process line by line (streaming)
         # Use iter_lines without decode_unicode to handle encoding ourselves
-        total_ip_cnt = 0
+        total_imported_ip_raw_cnt = 0
         ignored_ip_cnt = 0
         parse_errors: dict[str, int] = {}
         decision_duration = parse_duration(config.decision_duration)
@@ -1440,21 +1441,28 @@ def fetch_blocklist(
                     raw_ips.append(ip)
 
         logger.debug(f"Getting total IP count...")
-        total_ip_cnt = len(raw_ips)
-        logger.debug(f"Getting allowed IPs list...")
-        allowed_ips_list = [ip for ip in raw_ips if not allowlist.contains(ip)]
-        logger.debug(f"Getting allowed IPs set...")
-        allowed_ips = set(allowed_ips_list)
-        logger.debug(f"Getting ignored IP count...")
-        ignored_ip_cnt = total_ip_cnt - len(allowed_ips)
-        logger.debug(f"Appending to seen IPs...")
-        seen_ips += [(ip, decision_duration) for ip in allowed_ips]
-        logger.debug(f"Getting refreshed IP count...")
-        refreshed_ip_count = len(set([ip for ip in allowed_ips if ip in expiring_known_ips]))
-        logger.debug(f"Getting new IPs...")
-        new_ips = list(set(allowed_ips - all_known_ips))
-        logger.debug(f"Finishing...")
+        total_imported_ip_raw_cnt = len(raw_ips)
 
+        logger.debug(f"Getting allowed to block IPs list...")
+        allowed_to_block_ips_list = [ip for ip in raw_ips if not allowlist.contains(ip)]
+
+        logger.debug(f"Getting allowed to block IPs set...")
+        allowed_to_block_ips_set = set(allowed_to_block_ips_list)
+
+        logger.debug(f"Getting ignored IP count...")
+        ignored_ip_cnt = total_imported_ip_raw_cnt - len(allowed_to_block_ips_list)
+
+        logger.debug(f"Appending to seen IPs...")
+        seen_ips += [(ip, decision_duration) for ip in allowed_to_block_ips_set]
+
+        logger.debug(f"Getting refreshed IPs...")
+        refreshed_ips_list = [ip for ip in allowed_to_block_ips_set if ip in expiring_known_ips]
+        refreshed_ip_count = len(refreshed_ips_list)
+
+        logger.debug(f"Getting new IPs...")
+        new_ips = list(allowed_to_block_ips_set - all_known_ips_set)
+
+        logger.debug(f"Finishing...")
         # Log parse errors (capped)
         max_cnt = 20
         for error in parse_errors:
@@ -1469,14 +1477,14 @@ def fetch_blocklist(
         ignored_ips = f"{ignored_ip_cnt} ignored IPs (allow-list), " if ignored_ip_cnt > 0 else ""
         error_cnt = f", {nb_errors} parse errors" if nb_errors > 0 else ""
         logger.debug(
-            f"{source.name}: {total_ip_cnt} total IPs{error_cnt}, "
+            f"{source.name}: {total_imported_ip_raw_cnt} total IPs{error_cnt}, "
             f"{ignored_ips}"
             f"{len(new_ips) - refreshed_ip_count} unique new IPs, "
             f"{refreshed_ip_count} refreshed IPs"
         )
 
         duration = time.time() - t0
-        return new_ips, FetchResult(
+        return new_ips, refreshed_ips_list, FetchResult(
             source=source,
             success=True,
             new_ip_count=len(new_ips),
@@ -1502,7 +1510,7 @@ def fetch_blocklist(
         else:
             logger.error(f"{source.name}: unexpected error ({e})")
         duration = time.time() - t0
-        return new_ips, FetchResult(
+        return new_ips, refreshed_ips_list, FetchResult(
             source=source,
             success=False,
             duration=duration,
@@ -1963,8 +1971,8 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
     # Process each blocklist source
     for source in enabled_sources:
         refresh_period = timedelta(minutes=(config.refresh_period_limited_mn if source.rate_limited else config.refresh_period_frequent_mn))
-        all_known_ips = set([ip for ip, _ in seen_ips])
-        expiring_known_ips = list([ip for ip, expiration in seen_ips if expiration <= refresh_period])
+        all_known_ips_set = set([ip for ip, _ in seen_ips])
+        expiring_known_ips_list = list([ip for ip, expiration in seen_ips if expiration <= refresh_period])
 
         source_ok = 0
         source_failed = 0
@@ -1972,7 +1980,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         log_separator(logger)
         # Fetch blocklist and get results
         if source.preset_values:
-            new_ips, result = source.preset_values, FetchResult(
+            new_ips, refreshed_ips, result = [], source.preset_values, FetchResult(
                 source=source,
                 success=True,
                 new_ip_count=len(source.preset_values),
@@ -1981,13 +1989,13 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                 parse_errors={},
             )
         else:
-            new_ips, result = fetch_blocklist(
+            new_ips, refreshed_ips, result = fetch_blocklist(
                 session=session,
                 source=source,
                 config=config,
                 seen_ips=seen_ips,
-                all_known_ips=all_known_ips,
-                expiring_known_ips=expiring_known_ips,
+                all_known_ips_set=all_known_ips_set,
+                expiring_known_ips=expiring_known_ips_list,
                 allowlist=allowlist,
                 stats=stats,
                 logger=logger,
@@ -2018,10 +2026,11 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                 stats.sources_failed += 1
 
             # Add IPs to batch
-            stats.total_ips += len(new_ips)
+            stats.total_ips += len(new_ips) + len(refreshed_ips)
             stats.new_ips += len(new_ips)
+            stats.refreshed_ips += len(refreshed_ips)
 
-            for ip in new_ips:
+            for ip in new_ips + refreshed_ips:
                 batch.append(ip)
                 # Flush batch when full
                 if len(batch) >= config.batch_size:
@@ -2098,7 +2107,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         f"{stats.sources_failed} unavailable"
     )
 
-    if stats.new_ips == 0:
+    if stats.new_ips + stats.refreshed_ips == 0:
         logger.info(
             "No new IPs to import (all IPs already in CrowdSec)"
         )
