@@ -32,8 +32,9 @@ import re
 import signal
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
+from types import FunctionType
 from typing import Generator, Optional, Set
 
 import requests
@@ -62,7 +63,7 @@ __version__ = "3.6.1-alpha.1"
 # =============================================================================
 
 duration_pattern = re.compile(r'(\d+\.?\d*)\s*([hms])')
-def parse_duration(duration_str):
+def parse_duration(duration_str: str):
     total_seconds = 0
     for value, unit in duration_pattern.findall(duration_str):
         seconds = float(value)
@@ -81,7 +82,7 @@ def get_normal_headers(config: Config) -> dict[str, str]:
 def get_abuseipdb_api_headers(config: Config) -> dict[str, str]:
     return {
         "User-Agent": f"crowdsec-blocklist-import/{__version__}",
-        "Key": config.abuseipdb_api_key,
+        "Key": str(config.abuseipdb_api_key),
         "Accept": "text/plain",
     }
 
@@ -90,7 +91,7 @@ def get_normal_params(config: Config) -> dict[str, str]:
     return {}
 
 
-def get_abuseipdb_api_params(config: Config) -> dict[str, str]:
+def get_abuseipdb_api_params(config: Config) -> dict[str, int]:
     return {
         "confidenceMinimum": config.abuseipdb_min_confidence,
         "limit": config.abuseipdb_limit,
@@ -109,17 +110,17 @@ def get_abuseipdb_api_can_import(config: Config) -> bool:
 class BlocklistSource:
     """Represents a blocklist source."""
     name: str
-    url: str = None
-    preset_values: list[str] = None # Can be passed, instead of URL
+    url: str|None = None
+    preset_values: list[str]|None = None # Can be passed, instead of URL
     enabled_key: str = ""
     comment_char: str = "#"
     extract_field: Optional[int] = None  # Field index (0-based) to extract from lines
     field_separator: str = " "
     rate_limited: bool = False
-    api_key_name: str = None
-    get_headers: function = get_normal_headers
-    get_params: function = get_normal_params
-    get_can_import: function = get_normal_can_import
+    api_key_name: str|None = None
+    get_headers: FunctionType = get_normal_headers
+    get_params: FunctionType = get_normal_params
+    get_can_import: FunctionType = get_normal_can_import
 
 # Define all blocklist sources
 BLOCKLIST_SOURCES: list[BlocklistSource] = [
@@ -355,7 +356,7 @@ def find_similar_vars(unknown_var: str, valid_vars: set[str]) -> list[str]:
 
     Uses simple substring matching and edit distance approximation.
     """
-    suggestions = []
+    suggestions: list[str] = []
     unknown_lower = unknown_var.lower()
 
     for valid in valid_vars:
@@ -418,7 +419,7 @@ def validate_enable_env_vars(logger: Optional[logging.Logger] = None) -> tuple[b
         else:
             # Validate the boolean value
             is_valid, error = validate_bool_value(var_name, value)
-            if not is_valid:
+            if not is_valid and error:
                 errors.append(error)
 
     # Log warnings (don't fail, just warn)
@@ -456,8 +457,8 @@ class Config:
     decision_scenario: str = "external/blocklist"
 
     # Processing settings
-    allow_list: list[str] = None
-    custom_block_lists: list[str] = None
+    allow_list: list[str]|None = None
+    custom_block_lists: list[str]|None = None
     batch_size: int = 1000
     fetch_timeout: int = 60
     max_retries: int = 3
@@ -492,7 +493,7 @@ class Config:
     mode: str = "all" # all, frequent, limited
 
     # AbuseIPDB direct API
-    abuseipdb_api_key: str = ""
+    abuseipdb_api_key: str|None = None
     abuseipdb_api_key_file: str = ""
     abuseipdb_min_confidence: int = 90
     abuseipdb_limit: int = 10000
@@ -722,7 +723,6 @@ class MetricsCollector:
         self.logger = logger or logging.getLogger("blocklist-import")
         # Fresh registry per run — prevents stale label combinations from
         # lingering in the Pushgateway across runs (issue #6).
-        self.registry = CollectorRegistry()
 
         if not PROMETHEUS_AVAILABLE:
             self.logger.warning(
@@ -731,28 +731,30 @@ class MetricsCollector:
             )
             return
 
+        self.registry = CollectorRegistry() # type: ignore
+
         # Gauge: Total IPs currently imported
-        self.total_ips = Gauge(
+        self.total_ips = Gauge( # type: ignore
             "blocklist_import_total_ips",
             "Total number of IPs imported in the last run",
             registry=self.registry,
         )
 
-        self.refreshed_ips = Gauge(
+        self.refreshed_ips = Gauge( # type: ignore
             "blocklist_import_refreshed_ips",
             "Number of refreshed IPs in the last run",
             registry=self.registry,
         )
 
         # Gauge: Unix timestamp of last successful run
-        self.last_run_timestamp = Gauge(
+        self.last_run_timestamp = Gauge( # type: ignore
             "blocklist_import_last_run_timestamp",
             "Unix timestamp of the last import run",
             registry=self.registry,
         )
 
         # Gauge: Number of enabled blocklist sources
-        self.sources_enabled = Gauge(
+        self.sources_enabled = Gauge( # type: ignore
             "blocklist_import_sources_enabled",
             "Number of enabled blocklist sources",
             registry=self.registry,
@@ -763,7 +765,7 @@ class MetricsCollector:
         # source      = BlocklistSource.name  (stable, human-readable)
         # message     = sanitized fixed-category string — never raw exception text.
         #               See sanitize_error_message() for the full category list.
-        self.errors_total = Gauge(
+        self.errors_total = Gauge( # type: ignore
             "blocklist_import_errors_total",
             "Import errors labelled by type, source, and sanitized message category. "
             "message values are fixed categories (not raw exception strings) to bound cardinality.",
@@ -771,32 +773,32 @@ class MetricsCollector:
             registry=self.registry,
         )
 
-        self.duration_seconds = Histogram(
+        self.duration_seconds = Histogram( # type: ignore
             "blocklist_import_duration_seconds",
             "Duration of full import run in seconds",
             buckets=[1, 5, 10, 30, 60, 120, 300, 600],
             registry=self.registry,
         )
 
-        self.sources_successful = Gauge(
+        self.sources_successful = Gauge( # type: ignore
             "blocklist_import_sources_successful",
             "Number of sources successfully fetched in the last run",
             registry=self.registry,
         )
 
-        self.sources_failed = Gauge(
+        self.sources_failed = Gauge( # type: ignore
             "blocklist_import_sources_failed",
             "Number of sources that failed to fetch in the last run",
             registry=self.registry,
         )
 
-        self.existing_decisions = Gauge(
+        self.existing_decisions = Gauge( # type: ignore
             "blocklist_import_existing_decisions",
             "Number of existing CrowdSec decisions found",
             registry=self.registry,
         )
 
-        self.new_ips = Gauge(
+        self.new_ips = Gauge( # type: ignore
             "blocklist_import_new_ips",
             "Number of new unique IPs added in the last run",
             registry=self.registry,
@@ -804,7 +806,7 @@ class MetricsCollector:
 
         # Encoding errors were tracked in stats but previously invisible in
         # Prometheus. Now exposed as a top-level gauge
-        self.encoding_errors_total = Gauge(
+        self.encoding_errors_total = Gauge( # type: ignore
             "blocklist_import_encoding_errors_total",
             "Total number of lines skipped due to encoding errors across all sources",
             registry=self.registry,
@@ -813,21 +815,21 @@ class MetricsCollector:
         # Per-source granular metrics.
         # source_status value: 1 = success, 0 = failed.
         # There is intentionally NO 'status' label — value encodes the state
-        self.source_status = Gauge(
+        self.source_status = Gauge( # type: ignore
             "blocklist_import_source_status",
             "Per-source fetch status: 1=success, 0=failed",
             ["source"],
             registry=self.registry,
         )
 
-        self.source_ips = Gauge(
+        self.source_ips = Gauge( # type: ignore
             "blocklist_import_source_ips",
             "Number of unique new IPs fetched from each source in the last run",
             ["source"],
             registry=self.registry,
         )
 
-        self.source_duration_seconds = Gauge(
+        self.source_duration_seconds = Gauge( # type: ignore
             "blocklist_import_source_duration_seconds",
             "Time taken to fetch and parse each source (seconds)",
             ["source"],
@@ -929,7 +931,7 @@ class MetricsCollector:
             # Non-fatal: if deletion fails we warn but still push, which will
             # overwrite any series present in both runs.
             try:
-                delete_from_gateway(
+                delete_from_gateway( # type: ignore
                     self.pushgateway_url,
                     job="crowdsec-blocklist-import",
                 )
@@ -939,7 +941,7 @@ class MetricsCollector:
                     f"({self.pushgateway_url}): {del_exc}"
                 )
 
-            push_to_gateway(
+            push_to_gateway( # type: ignore
                 self.pushgateway_url,
                 job="crowdsec-blocklist-import",
                 registry=self.registry,
@@ -1032,15 +1034,15 @@ class Allowlist:
     """
 
     def __init__(self, logger: Optional[logging.Logger] = None):
-        self._exact_ips: Set[str] = set()
-        self._networks_v4: list[ipaddress.IPv4Network] = []
-        self._networks_v6: list[ipaddress.IPv6Network] = []
+        self.exact_ips: Set[str] = set()
+        self.networks_v4: list[ipaddress.IPv4Network] = []
+        self.networks_v6: list[ipaddress.IPv6Network] = []
         self._logger = logger or logging.getLogger("blocklist-import")
 
     @property
     def entry_count(self) -> int:
         """Total number of allowlist entries (IPs + networks)."""
-        return len(self._exact_ips) + len(self._networks_v4) + len(self._networks_v6)
+        return len(self.exact_ips) + len(self.networks_v4) + len(self.networks_v6)
 
     def add_entry(self, entry: str) -> None:
         """
@@ -1057,13 +1059,13 @@ class Allowlist:
             if "/" in entry:
                 network = ipaddress.ip_network(entry, strict=False)
                 if isinstance(network, ipaddress.IPv4Network):
-                    self._networks_v4.append(network)
+                    self.networks_v4.append(network)
                 else:
-                    self._networks_v6.append(network)
+                    self.networks_v6.append(network)
             else:
                 # Validate it's a real IP, then store as string for fast lookup
                 ipaddress.ip_address(entry)
-                self._exact_ips.add(entry)
+                self.exact_ips.add(entry)
         except (ValueError, TypeError) as e:
             self._logger.warning(f"Invalid allowlist entry '{entry}': {e}")
 
@@ -1087,7 +1089,7 @@ class Allowlist:
             True if the IP/CIDR should be allowlisted (skipped).
         """
         # Fast path: exact string match
-        if ip_str in self._exact_ips:
+        if ip_str in self.exact_ips:
             return True
 
         try:
@@ -1095,22 +1097,22 @@ class Allowlist:
                 # It's a CIDR from a blocklist - check overlap with allowlisted networks
                 network = ipaddress.ip_network(ip_str, strict=False)
                 if isinstance(network, ipaddress.IPv4Network):
-                    for allowed_net in self._networks_v4:
+                    for allowed_net in self.networks_v4:
                         if network.overlaps(allowed_net):
                             return True
                 else:
-                    for allowed_net in self._networks_v6:
+                    for allowed_net in self.networks_v6:
                         if network.overlaps(allowed_net):
                             return True
             else:
                 # It's a single IP - check containment in allowlisted networks
                 ip = ipaddress.ip_address(ip_str)
                 if isinstance(ip, ipaddress.IPv4Address):
-                    for network in self._networks_v4:
+                    for network in self.networks_v4:
                         if ip in network:
                             return True
                 else:
-                    for network in self._networks_v6:
+                    for network in self.networks_v6:
                         if ip in network:
                             return True
         except (ValueError, TypeError):
@@ -1144,7 +1146,7 @@ class Allowlist:
             response.raise_for_status()
             data = response.json()
 
-            seen = set()
+            seen: set[str] = set()
             for section in GITHUB_META_SECTIONS:
                 for cidr in data.get(section, []):
                     if cidr not in seen:
@@ -1195,9 +1197,9 @@ def build_allowlist(config: "Config", session: Optional[requests.Session] = None
 
     if allowlist.entry_count > 0 and logger:
         logger.info(
-            f"Allowlist total: {len(allowlist._exact_ips)} IPs, "
-            f"{len(allowlist._networks_v4)} IPv4 networks, "
-            f"{len(allowlist._networks_v6)} IPv6 networks"
+            f"Allowlist total: {len(allowlist.exact_ips)} IPs, "
+            f"{len(allowlist.networks_v4)} IPv4 networks, "
+            f"{len(allowlist.networks_v6)} IPv6 networks"
         )
 
     return allowlist
@@ -1275,9 +1277,10 @@ def parse_ip_or_network(value: str) -> tuple[Optional[str], Optional[str]]:
             return (str(network), None)
     except (ValueError, TypeError):
         return (None, value)
+    return (None, None)
 
 
-def extract_ips_from_line(original_line: str, errors: dict[str], source: BlocklistSource) -> Generator[str, None, None]:
+def extract_ips_from_line(original_line: str, errors: dict[str, int], source: BlocklistSource) -> Generator[str, None, None]:
     """
     Extract IP addresses/networks from a line of text.
 
@@ -1353,11 +1356,11 @@ class FetchResult:
     refreshed_ip_count: int = 0
     duration: float = 0.0
     error_type: str = ""                    # "fetch" | "parse" | "import" | "encoding"
-    error_exc: Optional[Exception] = None   # original exception (sanitized before use as label)
-    parse_errors: dict[str, int] = field(default_factory=dict)
+    error_exception: Optional[Exception] = None   # original exception (sanitized before use as label)
+    parse_errors: dict[str, int] = {}
 
 
-def log_separator(logger):
+def log_separator(logger: logging.Logger):
     logger.debug("-" * 10)
 
 
@@ -1365,7 +1368,7 @@ def fetch_blocklist(
     session: requests.Session,
     source: BlocklistSource,
     config: Config,
-    seen_ips: list[(str, timedelta)],
+    seen_ips: list[tuple[str, timedelta]],
     all_known_ips: set[str],
     expiring_known_ips: list[str],
     allowlist: Allowlist,
@@ -1390,7 +1393,7 @@ def fetch_blocklist(
         params = source.get_params(config)
 
         response = session.get(
-            source.url,
+            str(source.url),
             timeout=config.fetch_timeout,
             stream=True,
             headers=headers,
@@ -1480,7 +1483,7 @@ def fetch_blocklist(
             success=False,
             duration=duration,
             error_type="fetch",
-            error_exc=e,
+            error_exception=e,
         )
     except Exception as e:
         duration = time.time() - t0
@@ -1490,7 +1493,7 @@ def fetch_blocklist(
             success=False,
             duration=duration,
             error_type="fetch",
-            error_exc=e,
+            error_exception=e,
         )
 
 
@@ -1583,7 +1586,7 @@ class CrowdSecLAPI:
             self.logger.error(f"Machine login request failed: {e}")
             return None
 
-    def _get_machine_headers(self) -> Optional[dict]:
+    def _get_machine_headers(self) -> Optional[dict[str, str]]:
         """Get headers for machine-authenticated requests."""
         token = self._get_machine_token()
         if not token:
@@ -1613,14 +1616,14 @@ class CrowdSecLAPI:
         """Check if we have credentials for write operations."""
         return bool(self.machine_id and self.machine_password)
 
-    def get_existing_ips(self) -> list[(str, timedelta)]:
+    def get_existing_ips(self) -> list[tuple[str, timedelta]]:
         """
         Get all existing decision IPs from CrowdSec.
 
         Returns a set of IP addresses/CIDRs that already have decisions.
         Uses bouncer API key for read access.
         """
-        existing: list[str] = []
+        existing: list[tuple[str, timedelta]] = []
 
         try:
             response = self.session.get(
@@ -1633,7 +1636,7 @@ class CrowdSecLAPI:
                 decisions = response.json()
                 if decisions:
                     for decision in decisions:
-                        value = decision.get("value", "")
+                        value = str(decision.get("value", ""))
                         expiration_str = decision.get("duration", "0s")
                         expiration = parse_duration(expiration_str)
                         if value:
@@ -1672,7 +1675,7 @@ class CrowdSecLAPI:
         from datetime import datetime, timezone
 
         # Build decisions for this alert
-        decisions = []
+        decisions: list[dict[str, str]] = []
         for ip in ips:
             # Determine if it's a network or single IP
             scope = "Ip"
@@ -1691,7 +1694,7 @@ class CrowdSecLAPI:
         # Build alert payload (CrowdSec creates decisions via alerts)
         # See: https://crowdsecurity.github.io/api_doc/index.html?urls.primaryName=LAPI
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        alert = {
+        alert: dict[str, object] = {
             "capacity": 0,
             "decisions": decisions,
             "events": [],
@@ -1859,7 +1862,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         logger.info("Connected to CrowdSec LAPI")
 
     # Get existing decisions to avoid duplicates
-    existing_ips_with_expiration_info: list[str] = []
+    existing_ips_with_expiration_info: list[tuple[str, timedelta]] = []
     if not config.dry_run:
         logger.info("Checking existing CrowdSec decisions...")
         existing_ips_with_expiration_info = lapi.get_existing_ips()
@@ -1867,7 +1870,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         logger.info(f"Found {len(existing_ips_with_expiration_info)} existing decisions")
 
     # Track seen IPs for deduplication (includes existing)
-    seen_ips: list[(str, timedelta)] = existing_ips_with_expiration_info.copy()
+    seen_ips: list[tuple[str, timedelta]] = existing_ips_with_expiration_info.copy()
 
     # Collect enabled sources
     enabled_sources: list[BlocklistSource] = []
@@ -1882,7 +1885,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
     if config.custom_block_lists:
         for i, url in enumerate(config.custom_block_lists):
             if url:
-                enabled_sources.append(BlocklistSource(f"custom_blocklist_{i}", url, "custom_blocklists"))
+                enabled_sources.append(BlocklistSource(f"custom_blocklist_{i}", url, enabled_key="custom_blocklists"))
 
     logger.info(f"Fetching from {len(enabled_sources)} enabled blocklist sources...")
 
@@ -1940,12 +1943,12 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         batch = []
         return ok, failed
 
-    refresh_period = timedelta(minutes=(config.refresh_period_limited_mn if source.rate_limited else config.refresh_period_frequent_mn))
-    all_known_ips = set([ip for ip, _ in seen_ips])
-    expiring_known_ips = list([ip for ip, expiration in seen_ips if expiration <= refresh_period])
-
     # Process each blocklist source
     for source in enabled_sources:
+        refresh_period = timedelta(minutes=(config.refresh_period_limited_mn if source.rate_limited else config.refresh_period_frequent_mn))
+        all_known_ips = set([ip for ip, _ in seen_ips])
+        expiring_known_ips = list([ip for ip, expiration in seen_ips if expiration <= refresh_period])
+
         source_ok = 0
         source_failed = 0
         batch_cnt = 1
@@ -1988,7 +1991,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                     metrics.record_source_failure(
                         source_name=source.name,
                         error_type=result.error_type or "fetch",
-                        exc=result.error_exc,
+                        exc=result.error_exception,
                         duration=result.duration,
                     )
 
@@ -2152,10 +2155,10 @@ def send_webhook(config: Config, stats: "ImportStats", logger: logging.Logger) -
         logger.warning(f"Webhook failed: {e}")
 
 
-def _format_discord_webhook(stats: "ImportStats") -> dict:
+def _format_discord_webhook(stats: "ImportStats") -> dict[str, list[dict[str, str | int | list[dict[str, str | bool]] | dict[str, str]]]]:
     """Format stats as a Discord embed."""
     color = 0x2ECC71 if stats.imported_failed == 0 else 0xE74C3C
-    fields = [
+    fields: list[dict[str, str|bool]] = [
         {"name": "Sources", "value": f"{stats.sources_ok} ok / {stats.sources_failed} failed", "inline": True},
         {"name": "New IPs", "value": str(stats.new_ips), "inline": True},
         {"name": "Imported", "value": str(stats.imported_ok), "inline": True},
@@ -2174,7 +2177,7 @@ def _format_discord_webhook(stats: "ImportStats") -> dict:
     }
 
 
-def _format_slack_webhook(stats: "ImportStats") -> dict:
+def _format_slack_webhook(stats: "ImportStats") -> dict[str, str]:
     """Format stats as a Slack message."""
     emoji = ":white_check_mark:" if stats.imported_failed == 0 else ":warning:"
     text = (
@@ -2188,7 +2191,7 @@ def _format_slack_webhook(stats: "ImportStats") -> dict:
     return {"text": text}
 
 
-def _format_generic_webhook(stats: "ImportStats") -> dict:
+def _format_generic_webhook(stats: "ImportStats") -> dict[str, str | int | float]:
     """Format stats as a generic JSON payload."""
     return {
         "event": "blocklist_import_complete",
@@ -2475,7 +2478,7 @@ def _run_daemon(config: Config, logger: logging.Logger) -> int:
     """Run in daemon mode: repeat imports on a fixed interval."""
     shutdown = False
 
-    def _signal_handler(signum, frame):
+    def _signal_handler(signum: object, frame: object):
         nonlocal shutdown
         logger.info(f"Received signal {signum}, shutting down after current run...")
         shutdown = True

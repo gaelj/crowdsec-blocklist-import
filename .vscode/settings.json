@@ -1,3 +1,35 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "cSpell.words": [
+        "abuseipdb",
+        "blocklist",
+        "Blocklists",
+        "borestad",
+        "botvrij",
+        "Bruteforce",
+        "Censys",
+        "creds",
+        "crowdsec",
+        "cscli",
+        "cybercrime",
+        "dshield",
+        "Feodo",
+        "Firehol",
+        "forcelist",
+        "greensnow",
+        "hostnames",
+        "LAPI",
+        "leakspeed",
+        "Lhaus",
+        "Maltrail",
+        "NXDOMAIN",
+        "pushgateway",
+        "Shodan",
+        "signum",
+        "Spamhaus",
+        "stopforumspam",
+        "unparseable",
+        "vxvault",
+        "wolffcatskyy"
+    ]
 }
