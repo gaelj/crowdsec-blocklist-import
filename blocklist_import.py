@@ -1415,6 +1415,7 @@ def fetch_blocklist(
 
         # Process line by line (streaming)
         # Use iter_lines without decode_unicode to handle encoding ourselves
+        total_raw_ip_cnt = 0
         total_imported_unique_ip_cnt = 0
         ignored_white_listed_ip_cnt = 0
         refreshed_ip_cnt = 0
@@ -1424,7 +1425,7 @@ def fetch_blocklist(
 
         new_ips: list[str] = []
 
-        seen_ips2 = [ip for ip, _ in seen_ips]
+        non_expiring_seen_ips = non_expiring_known_ips.copy()
 
         logger.debug(f"Parsing...")
         for raw_line in response.iter_lines():
@@ -1443,18 +1444,18 @@ def fetch_blocklist(
                     line = raw_line
 
                 for ip in extract_ips_from_line(line, parse_errors, source):
-                    if ip not in seen_ips2:
-                        seen_ips2.append(ip)
+                    total_raw_ip_cnt += 1
+                    if ip not in non_expiring_seen_ips:
+                        non_expiring_seen_ips.append(ip)
                         seen_ips.append((ip, decision_duration))
-                        total_imported_unique_ip_cnt += 1
                         if allowlist.contains(ip):
                             ignored_white_listed_ip_cnt += 1
-                        elif ip in non_expiring_known_ips:
-                            pass
                         elif ip in expiring_known_ips:
                             refreshed_ip_cnt += 1
+                            total_imported_unique_ip_cnt += 1
                             refresh_ips.append(ip)
                         else:
+                            total_imported_unique_ip_cnt += 1
                             new_ips.append(ip)
 
         new_ip_cnt = len(new_ips)
@@ -1471,16 +1472,20 @@ def fetch_blocklist(
         nb_errors = sum(parse_errors.values())
         stats.parse_errors += nb_errors
 
-        ignored_ips = f"{ignored_white_listed_ip_cnt} ignored IPs (allow-list), " if ignored_white_listed_ip_cnt > 0 else ""
         error_cnt = f", {nb_errors} parse errors" if nb_errors > 0 else ""
+        ignored_ips = f"{ignored_white_listed_ip_cnt} ignored IPs (allow-list), " if ignored_white_listed_ip_cnt > 0 else ""
+        duration = time.time() - t0
         logger.debug(
-            f"{source.name}: {total_imported_unique_ip_cnt} total IPs{error_cnt}, "
+            f"{source.name}: "
+            f"{total_raw_ip_cnt} total IPs, "
+            f"{total_imported_unique_ip_cnt} imported IPs"
+            f"{error_cnt}, "
             f"{ignored_ips}"
             f"{new_ip_cnt} unique new IPs, "
-            f"{refreshed_ip_cnt} refreshed IPs"
+            f"{refreshed_ip_cnt} refreshed IPs, "
+            f"duration: {duration} sec"
         )
 
-        duration = time.time() - t0
         return new_ips, refresh_ips, FetchResult(
             source=source,
             success=True,
