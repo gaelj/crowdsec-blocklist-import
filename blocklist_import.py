@@ -65,6 +65,13 @@ __version__ = "3.6.1-alpha.1"
 duration_pattern = re.compile(r'(\d+\.?\d*)\s*([hms])')
 def parse_duration(duration_str: str):
     total_seconds = 0
+    duration_str = duration_str \
+        .replace("hrs", "h") \
+        .replace("hr", "h") \
+        .replace("mns", "m") \
+        .replace("mn", "m") \
+        .replace("secs", "s") \
+        .replace("sec", "s")
     for value, unit in duration_pattern.findall(duration_str):
         seconds = float(value)
         if unit == 'h':
@@ -465,8 +472,8 @@ class Config:
     log_timestamps: bool = True
 
     # IP refreshing time-spans: we refresh IPs that will soon expire before they do
-    refresh_period_frequent_mn: int = 60 # refresh period for non rate limited sources
-    refresh_period_limited_mn: int = 60 * 5 # refresh period for rate limited sources
+    refresh_period_frequent_mn: int = 60 + 2 * 15 # refresh period for non rate limited sources
+    refresh_period_limited_mn: int = 60 * 5 + 2 * 15 # refresh period for rate limited sources
 
     # Logging
     log_level: str = "INFO"
@@ -550,8 +557,8 @@ class Config:
             allow_list=[x.strip() for x in os.getenv("ALLOWLIST", "").split(",") if x.strip()],
             allowlist_github=get_bool("ALLOWLIST_GITHUB", False),
             custom_block_lists=[x.strip() for x in os.getenv("CUSTOM_BLOCKLISTS", "").split(",") if x.strip()],
-            refresh_period_frequent_mn=int(os.getenv("REFRESH_PERIOD_FREQUENT_MN", "60")),
-            refresh_period_limited_mn=int(os.getenv("REFRESH_PERIOD_LIMITED_MN", "300")),
+            refresh_period_frequent_mn=int(os.getenv("REFRESH_PERIOD_FREQUENT_MN", "90")),
+            refresh_period_limited_mn=int(os.getenv("REFRESH_PERIOD_LIMITED_MN", "330")),
             batch_size=int(os.getenv("BATCH_SIZE", "1000")),
             fetch_timeout=int(os.getenv("FETCH_TIMEOUT", "60")),
             max_retries=int(os.getenv("MAX_RETRIES", "3")),
