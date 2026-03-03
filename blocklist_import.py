@@ -252,7 +252,7 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
     BlocklistSource(
         name="AbuseIPDB",
         url="https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-1d.ipv4",
-        enabled_key="enable_abuseipdb",
+        enabled_key="enable_abuse_ipdb",
     ),
     # Cybercrime Tracker C2 (FireHOL mirror)
     BlocklistSource(
@@ -308,7 +308,7 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
     BlocklistSource(
         name="AbuseIPDB API",
         url="https://api.abuseipdb.com/api/v2/blacklist",
-        enabled_key="enable_abuseipdb",
+        enabled_key="enable_abuse_ipdb",
         rate_limited = True,
         get_headers = get_abuseipdb_api_headers,
         get_params = get_abuseipdb_api_params,
@@ -527,7 +527,7 @@ class Config:
     enable_stopforumspam: bool = True
     enable_tor: bool = True
     enable_scanners: bool = True
-    enable_abuseipdb: bool = True
+    enable_abuse_ipdb: bool = True
     enable_cybercrime_tracker: bool = True
     enable_monty_security_c2: bool = True
     enable_vxvault: bool = True
@@ -593,7 +593,7 @@ class Config:
             enable_stopforumspam=get_bool("ENABLE_STOPFORUMSPAM"),
             enable_tor=get_bool("ENABLE_TOR"),
             enable_scanners=get_bool("ENABLE_SCANNERS"),
-            enable_abuseipdb=get_bool("ENABLE_ABUSE_IPDB"),
+            enable_abuse_ipdb=get_bool("ENABLE_ABUSE_IPDB"),
             enable_cybercrime_tracker=get_bool("ENABLE_CYBERCRIME_TRACKER"),
             enable_monty_security_c2=get_bool("ENABLE_MONTY_SECURITY_C2"),
             enable_vxvault=get_bool("ENABLE_VXVAULT"),
