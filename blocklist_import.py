@@ -917,7 +917,7 @@ class MetricsCollector:
     # End-of-run aggregate update
     # ------------------------------------------------------------------
 
-    def update_aggregates(self, stats: "ImportStats", enabled_count: int) -> None:
+    def update_aggregates(self, stats: ImportStats, enabled_count: int) -> None:
         """Update scalar/aggregate gauges at end of run."""
         if not PROMETHEUS_AVAILABLE or not self.pushgateway_url:
             return
@@ -1393,7 +1393,7 @@ def fetch_blocklist(
     non_expiring_known_ips: list[str],
     expiring_known_ips: list[str],
     allowlist: Allowlist,
-    stats: "ImportStats",
+    stats: ImportStats,
     logger: logging.Logger,
 ) -> tuple[list[str], list[str], FetchResult]:
     """
@@ -2164,7 +2164,7 @@ def send_telemetry(
 # Webhook Notifications
 # =============================================================================
 
-def send_webhook(config: Config, stats: "ImportStats", logger: logging.Logger) -> None:
+def send_webhook(config: Config, stats: ImportStats, logger: logging.Logger) -> None:
     """Send import results to a webhook (Discord, Slack, or generic)."""
     if not config.webhook_url:
         return
@@ -2192,7 +2192,7 @@ def send_webhook(config: Config, stats: "ImportStats", logger: logging.Logger) -
         logger.warning(f"Webhook failed: {e}")
 
 
-def _format_discord_webhook(stats: "ImportStats") -> dict[str, list[dict[str, str | int | list[dict[str, str | bool]] | dict[str, str]]]]:
+def _format_discord_webhook(stats: ImportStats) -> dict[str, list[dict[str, str | int | list[dict[str, str | bool]] | dict[str, str]]]]:
     """Format stats as a Discord embed."""
     color = 0x2ECC71 if stats.imported_failed == 0 else 0xE74C3C
     fields: list[dict[str, str|bool]] = [
@@ -2214,7 +2214,7 @@ def _format_discord_webhook(stats: "ImportStats") -> dict[str, list[dict[str, st
     }
 
 
-def _format_slack_webhook(stats: "ImportStats") -> dict[str, str]:
+def _format_slack_webhook(stats: ImportStats) -> dict[str, str]:
     """Format stats as a Slack message."""
     emoji = ":white_check_mark:" if stats.imported_failed == 0 else ":warning:"
     text = (
@@ -2228,7 +2228,7 @@ def _format_slack_webhook(stats: "ImportStats") -> dict[str, str]:
     return {"text": text}
 
 
-def _format_generic_webhook(stats: "ImportStats") -> dict[str, str | int | float]:
+def _format_generic_webhook(stats: ImportStats) -> dict[str, str | int | float]:
     """Format stats as a generic JSON payload."""
     return {
         "event": "blocklist_import_complete",

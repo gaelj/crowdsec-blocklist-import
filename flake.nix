@@ -21,6 +21,7 @@
           ps: with ps; [
             requests
             prometheus-client
+            pytest
             python-dotenv
           ]
         );
