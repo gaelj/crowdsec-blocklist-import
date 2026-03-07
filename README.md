@@ -3,7 +3,7 @@
 **Real-time, deduplicated, normalized CrowdSec blocklists — instantly enforced across all your firewalls, CDNs, and network devices.**
 
 [![Awesome CrowdSec](https://img.shields.io/badge/awesome-crowdsec-green?style=flat-square)](https://github.com/wolffcatskyy/awesome-crowdsec)
-[![Version](https://img.shields.io/badge/version-3.5.0-blue?style=flat-square)](https://github.com/wolffcatskyy/crowdsec-blocklist-import)
+[![Version](https://img.shields.io/badge/version-3.6.1-alpha.1-blue?style=flat-square)](https://github.com/wolffcatskyy/crowdsec-blocklist-import)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-crowdsec--blocklist--import--python-blue?style=flat-square&logo=github)](https://github.com/wolffcatskyy/crowdsec-blocklist-import/pkgs/container/crowdsec-blocklist-import-python)
 
