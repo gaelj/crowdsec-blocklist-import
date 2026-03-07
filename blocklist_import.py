@@ -63,6 +63,8 @@ __version__ = "3.6.1-alpha.1"
 # =============================================================================
 
 duration_pattern = re.compile(r'(\d+\.?\d*)\s*([hms])')
+
+
 def parse_duration(duration_str: str):
     total_seconds = 0
     duration_str = duration_str \
@@ -117,17 +119,19 @@ def get_abuseipdb_api_can_import(config: Config) -> bool:
 class BlocklistSource:
     """Represents a blocklist source."""
     name: str
-    url: str|None = None
-    preset_values: list[str]|None = None # Can be passed, instead of URL
+    url: str | None = None
+    preset_values: list[str] | None = None  # Can be passed, instead of URL
     enabled_key: str = ""
     comment_char: str = "#"
-    extract_field: Optional[int] = None  # Field index (0-based) to extract from lines
+    # Field index (0-based) to extract from lines
+    extract_field: Optional[int] = None
     field_separator: str = " "
     rate_limited: bool = False
-    api_key_name: str|None = None
+    api_key_name: str | None = None
     get_headers: FunctionType = get_normal_headers
     get_params: FunctionType = get_normal_params
     get_can_import: FunctionType = get_normal_can_import
+
 
 # Define all blocklist sources
 BLOCKLIST_SOURCES: list[BlocklistSource] = [
@@ -240,7 +244,7 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
         name="Tor (dan.me.uk)",
         url="https://www.dan.me.uk/torlist/?exit",
         enabled_key="enable_tor",
-        rate_limited = True,
+        rate_limited=True,
     ),
     # Scanners
     BlocklistSource(
@@ -309,14 +313,14 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
         name="AbuseIPDB API",
         url="https://api.abuseipdb.com/api/v2/blacklist",
         enabled_key="enable_abuse_ipdb",
-        rate_limited = True,
-        get_headers = get_abuseipdb_api_headers,
-        get_params = get_abuseipdb_api_params,
-        get_can_import = get_abuseipdb_api_can_import
+        rate_limited=True,
+        get_headers=get_abuseipdb_api_headers,
+        get_params=get_abuseipdb_api_params,
+        get_can_import=get_abuseipdb_api_can_import
     ),
     BlocklistSource(
         name="Static scanner IPs (Censys)",
-        preset_values = [
+        preset_values=[
             "192.35.168.0/23",
             "162.142.125.0/24",
             "74.120.14.0/24",
@@ -331,10 +335,12 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
 # =============================================================================
 
 # All valid ENABLE_* environment variable names (canonical list)
-VALID_ENABLE_VARS: set[str] = set([ s.enabled_key.upper() for s in BLOCKLIST_SOURCES ])
+VALID_ENABLE_VARS: set[str] = set(
+    [s.enabled_key.upper() for s in BLOCKLIST_SOURCES])
 
 # Valid boolean string values (case-insensitive)
-VALID_BOOL_VALUES: set[str] = {"true", "false", "1", "0", "yes", "no", "on", "off"}
+VALID_BOOL_VALUES: set[str] = {
+    "true", "false", "1", "0", "yes", "no", "on", "off"}
 
 
 class EnvValidationError(Exception):
@@ -464,16 +470,18 @@ class Config:
     decision_scenario: str = "external/blocklist"
 
     # Processing settings
-    allow_list: list[str]|None = None
-    custom_block_lists: list[str]|None = None
+    allow_list: list[str] | None = None
+    custom_block_lists: list[str] | None = None
     batch_size: int = 1000
     fetch_timeout: int = 60
     max_retries: int = 3
     log_timestamps: bool = True
 
     # IP refreshing time-spans: we refresh IPs that will soon expire before they do
-    refresh_period_frequent_mn: int = 60 + 2 * 15 # refresh period for non rate limited sources
-    refresh_period_limited_mn: int = 60 * 5 + 2 * 15 # refresh period for rate limited sources
+    # refresh period for non rate limited sources
+    refresh_period_frequent_mn: int = 60 + 2 * 15
+    refresh_period_limited_mn: int = 60 * 5 + 2 * \
+        15  # refresh period for rate limited sources
 
     # Logging
     log_level: str = "INFO"
@@ -497,10 +505,10 @@ class Config:
     webhook_url: str = ""
     webhook_type: str = "generic"  # generic, discord, slack
 
-    mode: str = "all" # all, frequent, limited
+    mode: str = "all"  # all, frequent, limited
 
     # AbuseIPDB direct API
-    abuseipdb_api_key: str|None = None
+    abuseipdb_api_key: str | None = None
     abuseipdb_api_key_file: str = ""
     abuseipdb_min_confidence: int = 90
     abuseipdb_limit: int = 10000
@@ -739,36 +747,36 @@ class MetricsCollector:
             )
             return
 
-        self.registry = CollectorRegistry() # type: ignore
+        self.registry = CollectorRegistry()  # type: ignore
 
         # Gauge: Total IPs currently imported
-        self.total_ips = Gauge( # type: ignore
+        self.total_ips = Gauge(  # type: ignore
             "blocklist_import_total_ips",
             "Total number of IPs imported in the last run",
             registry=self.registry,
         )
 
-        self.new_ips = Gauge( # type: ignore
+        self.new_ips = Gauge(  # type: ignore
             "blocklist_import_new_ips",
             "Number of new unique IPs added in the last run",
             registry=self.registry,
         )
 
-        self.refreshed_ips = Gauge( # type: ignore
+        self.refreshed_ips = Gauge(  # type: ignore
             "blocklist_import_refreshed_ips",
             "Number of refreshed IPs in the last run",
             registry=self.registry,
         )
 
         # Gauge: Unix timestamp of last successful run
-        self.last_run_timestamp = Gauge( # type: ignore
+        self.last_run_timestamp = Gauge(  # type: ignore
             "blocklist_import_last_run_timestamp",
             "Unix timestamp of the last import run",
             registry=self.registry,
         )
 
         # Gauge: Number of enabled blocklist sources
-        self.sources_enabled = Gauge( # type: ignore
+        self.sources_enabled = Gauge(  # type: ignore
             "blocklist_import_sources_enabled",
             "Number of enabled blocklist sources",
             registry=self.registry,
@@ -779,7 +787,7 @@ class MetricsCollector:
         # source      = BlocklistSource.name  (stable, human-readable)
         # message     = sanitized fixed-category string — never raw exception text.
         #               See sanitize_error_message() for the full category list.
-        self.errors_total = Gauge( # type: ignore
+        self.errors_total = Gauge(  # type: ignore
             "blocklist_import_errors_total",
             "Import errors labelled by type, source, and sanitized message category. "
             "message values are fixed categories (not raw exception strings) to bound cardinality.",
@@ -787,26 +795,26 @@ class MetricsCollector:
             registry=self.registry,
         )
 
-        self.duration_seconds = Histogram( # type: ignore
+        self.duration_seconds = Histogram(  # type: ignore
             "blocklist_import_duration_seconds",
             "Duration of full import run in seconds",
             buckets=[1, 5, 10, 30, 60, 120, 300, 600],
             registry=self.registry,
         )
 
-        self.sources_ok = Gauge( # type: ignore
+        self.sources_ok = Gauge(  # type: ignore
             "blocklist_import_sources_successful",
             "Number of sources successfully fetched in the last run",
             registry=self.registry,
         )
 
-        self.sources_failed = Gauge( # type: ignore
+        self.sources_failed = Gauge(  # type: ignore
             "blocklist_import_sources_failed",
             "Number of sources that failed to fetch in the last run",
             registry=self.registry,
         )
 
-        self.existing_decisions = Gauge( # type: ignore
+        self.existing_decisions = Gauge(  # type: ignore
             "blocklist_import_existing_decisions",
             "Number of existing CrowdSec decisions found",
             registry=self.registry,
@@ -814,7 +822,7 @@ class MetricsCollector:
 
         # Encoding errors were tracked in stats but previously invisible in
         # Prometheus. Now exposed as a top-level gauge
-        self.encoding_errors_total = Gauge( # type: ignore
+        self.encoding_errors_total = Gauge(  # type: ignore
             "blocklist_import_encoding_errors_total",
             "Total number of lines skipped due to encoding errors across all sources",
             registry=self.registry,
@@ -823,28 +831,28 @@ class MetricsCollector:
         # Per-source granular metrics.
         # source_status value: 1 = success, 0 = failed.
         # There is intentionally NO 'status' label — value encodes the state
-        self.source_status = Gauge( # type: ignore
+        self.source_status = Gauge(  # type: ignore
             "blocklist_import_source_status",
             "Per-source fetch status: 1=success, 0=failed",
             ["source"],
             registry=self.registry,
         )
 
-        self.source_ips = Gauge( # type: ignore
+        self.source_ips = Gauge(  # type: ignore
             "blocklist_import_source_ips",
             "Number of unique new IPs fetched from each source in the last run",
             ["source"],
             registry=self.registry,
         )
 
-        self.source_refreshed_ips = Gauge( # type: ignore
+        self.source_refreshed_ips = Gauge(  # type: ignore
             "blocklist_import_source_refreshed_ips",
             "Number of unique refreshed IPs fetched from each source in the last run",
             ["source"],
             registry=self.registry,
-            )
+        )
 
-        self.source_duration_seconds = Gauge( # type: ignore
+        self.source_duration_seconds = Gauge(  # type: ignore
             "blocklist_import_source_duration_seconds",
             "Time taken to fetch and parse each source (seconds)",
             ["source"],
@@ -951,7 +959,7 @@ class MetricsCollector:
             # Non-fatal: if deletion fails we warn but still push, which will
             # overwrite any series present in both runs.
             try:
-                delete_from_gateway( # type: ignore
+                delete_from_gateway(  # type: ignore
                     self.pushgateway_url,
                     job="crowdsec-blocklist-import",
                 )
@@ -961,7 +969,7 @@ class MetricsCollector:
                     f"({self.pushgateway_url}): {del_exc}"
                 )
 
-            push_to_gateway( # type: ignore
+            push_to_gateway(  # type: ignore
                 self.pushgateway_url,
                 job="crowdsec-blocklist-import",
                 registry=self.registry,
@@ -1377,7 +1385,8 @@ class FetchResult:
     refreshed_unique_ip_count: int = 0
     duration: float = 0.0
     error_type: str = ""                    # "fetch" | "parse" | "import" | "encoding"
-    error_exception: Optional[Exception] = None   # original exception (sanitized before use as label)
+    # original exception (sanitized before use as label)
+    error_exception: Optional[Exception] = None
     parse_errors: dict[str, int] = field(default_factory=dict[str, int])
 
 
@@ -1437,7 +1446,7 @@ def fetch_blocklist(
 
         non_expiring_seen_ips = set(non_expiring_known_ips.copy())
 
-        logger.debug(f"Parsing...")
+        logger.debug("Parsing...")
         for raw_line in response.iter_lines():
             if raw_line:
                 # Decode bytes to string, handling various encodings
@@ -1466,10 +1475,10 @@ def fetch_blocklist(
                             total_imported_unique_ip_cnt += 1
                             new_ips.append(ip)
 
-        logger.debug(f"Applying allow-list to new IPs...")
+        logger.debug("Applying allow-list to new IPs...")
         allowed_new_ips = [ip for ip in new_ips if not allowlist.contains(ip)]
 
-        logger.debug(f"Applying allow-list to refreshed IPs...")
+        logger.debug("Applying allow-list to refreshed IPs...")
         allowed_refresh_ips = [ip for ip in refresh_ips if not allowlist.contains(ip)]
 
         ignored_white_listed_ip_cnt = len(refresh_ips) - len(allowed_refresh_ips) + len(new_ips) - len(allowed_new_ips)
@@ -1479,7 +1488,7 @@ def fetch_blocklist(
 
         new_ip_cnt = len(new_ips)
 
-        logger.debug(f"Finishing...")
+        logger.debug("Finishing...")
         # Log parse errors (capped)
         max_cnt = 20
         for error in parse_errors:
@@ -1517,7 +1526,7 @@ def fetch_blocklist(
         )
 
     except Exception as e:
-        if isinstance(e , requests.RequestException):
+        if isinstance(e, requests.RequestException):
             logger.warning(f"{source.name}: unavailable ({e})")
         else:
             logger.error(f"{source.name}: unexpected error ({e})")
@@ -2056,7 +2065,6 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
             source_failed += failed
             log_batch_stats(source_ok, source_failed, batch_cnt)
 
-
     # Flush consolidated alert (single alert for all sources)
     if config.consolidate_alerts and deferred_ips:
         logger.info(f"Sending consolidated alert with {len(deferred_ips)} IPs from all sources")
@@ -2195,7 +2203,7 @@ def send_webhook(config: Config, stats: ImportStats, logger: logging.Logger) -> 
 def _format_discord_webhook(stats: ImportStats) -> dict[str, list[dict[str, str | int | list[dict[str, str | bool]] | dict[str, str]]]]:
     """Format stats as a Discord embed."""
     color = 0x2ECC71 if stats.imported_failed == 0 else 0xE74C3C
-    fields: list[dict[str, str|bool]] = [
+    fields: list[dict[str, str | bool]] = [
         {"name": "Sources", "value": f"{stats.sources_ok} ok / {stats.sources_failed} failed", "inline": True},
         {"name": "New IPs", "value": str(stats.new_ips), "inline": True},
         {"name": "Imported", "value": str(stats.imported_ok), "inline": True},
