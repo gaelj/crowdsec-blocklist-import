@@ -243,6 +243,8 @@ class Config:
     webhook_url: str = ""
     webhook_type: str = "generic"  # generic, discord, slack
 
+    mode: str = "all" # all, frequent, limited
+
     # AbuseIPDB direct API
     abuseipdb_api_key: str = ""
     abuseipdb_api_key_file: str = ""
@@ -356,6 +358,7 @@ class BlocklistSource:
     comment_char: str = "#"
     extract_field: Optional[int] = None  # Field index (0-based) to extract from lines
     field_separator: str = " "
+    rate_limited: bool = False
 
 
 # Define all blocklist sources
@@ -469,6 +472,7 @@ BLOCKLIST_SOURCES: list[BlocklistSource] = [
         name="Tor (dan.me.uk)",
         url="https://www.dan.me.uk/torlist/?exit",
         enabled_key="enable_tor",
+        rate_limited = True,
     ),
     # Scanners
     BlocklistSource(
@@ -1298,7 +1302,7 @@ def log_separator(logger):
 def fetch_blocklist(
     session: requests.Session,
     source: BlocklistSource,
-    timeout: int,
+    config: Config,
     seen_ips: Set[str],
     allowlist: Allowlist,
     stats: "ImportStats",
@@ -1311,6 +1315,10 @@ def fetch_blocklist(
     FetchResult now carries duration, error_type, error_exc and
     per-token parse_errors so MetricsCollector can record full detail.
     """
+    if (source.rate_limited != (config.mode == "limited")) and (config.mode != "all"):
+        logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
+        return [], None
+
     new_ips: list[str] = []
     t0 = time.time()
 
@@ -1319,7 +1327,7 @@ def fetch_blocklist(
 
         response = session.get(
             source.url,
-            timeout=timeout,
+            timeout=config.fetch_timeout,
             stream=True,
             headers={"User-Agent": f"crowdsec-blocklist-import/{__version__}"},
         )
@@ -1701,6 +1709,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
     logger.info(f"Decision duration: {config.decision_duration}")
     logger.info(f"LAPI URL: {config.lapi_url}")
     logger.info(f"Machine ID: {config.machine_id}")
+    logger.info(f"Mode: {config.mode}")
 
     if config.dry_run:
         logger.info("DRY RUN MODE - no changes will be made")
@@ -1847,54 +1856,55 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
         new_ips, result = fetch_blocklist(
             session=session,
             source=source,
-            timeout=config.fetch_timeout,
+            config=config,
             seen_ips=seen_ips,
             allowlist=allowlist,
             stats=stats,
             logger=logger,
         )
 
-        # --- Update per-source metrics immediately after fetch ---
-        if metrics:
+        if result:
+            # --- Update per-source metrics immediately after fetch ---
+            if metrics:
+                if result.success:
+                    metrics.record_source_success(
+                        source_name=source.name,
+                        ip_count=result.ip_count,
+                        duration=result.duration,
+                    )
+                    if result.parse_errors:
+                        metrics.record_parse_errors(source.name, result.parse_errors)
+                else:
+                    metrics.record_source_failure(
+                        source_name=source.name,
+                        error_type=result.error_type or "fetch",
+                        exc=result.error_exc,
+                        duration=result.duration,
+                    )
+
             if result.success:
-                metrics.record_source_success(
-                    source_name=source.name,
-                    ip_count=result.ip_count,
-                    duration=result.duration,
-                )
-                if result.parse_errors:
-                    metrics.record_parse_errors(source.name, result.parse_errors)
+                stats.sources_ok += 1
             else:
-                metrics.record_source_failure(
-                    source_name=source.name,
-                    error_type=result.error_type or "fetch",
-                    exc=result.error_exc,
-                    duration=result.duration,
-                )
+                stats.sources_failed += 1
 
-        if result.success:
-            stats.sources_ok += 1
-        else:
-            stats.sources_failed += 1
+            # Add IPs to batch
+            stats.total_ips_fetched += len(new_ips)
+            stats.new_ips += len(new_ips)
 
-        # Add IPs to batch
-        stats.total_ips_fetched += len(new_ips)
-        stats.new_ips += len(new_ips)
+            for ip in new_ips:
+                batch.append(ip)
+                # Flush batch when full
+                if len(batch) >= config.batch_size:
+                    batch_cnt += 1
+                    ok, failed = flush_batch(source.name)
+                    source_ok += ok
+                    source_failed += failed
 
-        for ip in new_ips:
-            batch.append(ip)
-            # Flush batch when full
-            if len(batch) >= config.batch_size:
-                batch_cnt += 1
-                ok, failed = flush_batch(source.name)
-                source_ok += ok
-                source_failed += failed
-
-        # Flush any remaining IPs
-        ok, failed = flush_batch(source.name)
-        source_ok += ok
-        source_failed += failed
-        log_batch_stats(source_ok, source_failed, batch_cnt)
+            # Flush any remaining IPs
+            ok, failed = flush_batch(source.name)
+            source_ok += ok
+            source_failed += failed
+            log_batch_stats(source_ok, source_failed, batch_cnt)
 
     # Static scanner IPs (Censys)
     log_separator(logger)
@@ -1931,21 +1941,41 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
             stats=stats,
             logger=logger,
         )
-        if abuseipdb_result.success:
-            stats.sources_ok += 1
-        else:
-            stats.sources_failed += 1
 
-        stats.total_ips_fetched += len(abuseipdb_ips)
-        stats.new_ips += len(abuseipdb_ips)
+        if abuseipdb_result:
+            # --- Update per-source metrics immediately after fetch ---
+            if metrics:
+                if abuseipdb_result.success:
+                    metrics.record_source_success(
+                        source_name="AbuseIPDB API",
+                        ip_count=abuseipdb_result.ip_count,
+                        duration=abuseipdb_result.duration,
+                    )
+                    if abuseipdb_result.parse_errors:
+                        metrics.record_parse_errors("AbuseIPDB API", abuseipdb_result.parse_errors)
+                else:
+                    metrics.record_source_failure(
+                        source_name="AbuseIPDB API",
+                        error_type=abuseipdb_result.error_type or "fetch",
+                        exc=abuseipdb_result.error_exc,
+                        duration=abuseipdb_result.duration,
+                    )
 
-        for ip in abuseipdb_ips:
-            batch.append(ip)
-            if len(batch) >= config.batch_size:
-                ok, failed = flush_batch("AbuseIPDB API")
-                log_batch_stats(ok, failed, 1)
-        ok, failed = flush_batch("AbuseIPDB API")
-        log_batch_stats(ok, failed, 1)
+            if abuseipdb_result.success:
+                stats.sources_ok += 1
+            else:
+                stats.sources_failed += 1
+
+            stats.total_ips_fetched += len(abuseipdb_ips)
+            stats.new_ips += len(abuseipdb_ips)
+
+            for ip in abuseipdb_ips:
+                batch.append(ip)
+                if len(batch) >= config.batch_size:
+                    ok, failed = flush_batch("AbuseIPDB API")
+                    log_batch_stats(ok, failed, 1)
+            ok, failed = flush_batch("AbuseIPDB API")
+            log_batch_stats(ok, failed, 1)
 
     # Flush consolidated alert (single alert for all sources)
     if config.consolidate_alerts and deferred_ips:
@@ -2155,7 +2185,12 @@ def fetch_abuseipdb_api(
         name="AbuseIPDB API",
         url="https://api.abuseipdb.com/api/v2/blacklist",
         enabled_key="enable_abuseipdb",
+        rate_limited = True
     )
+
+    if source.rate_limited != config.mode == "frequent" and config.mode != "all":
+        logger.debug(f"Mode is '{config.mode}': ignoring source {source.name}")
+        return [], None
 
     new_ips: list[str] = []
 
@@ -2364,6 +2399,12 @@ cause the program to exit with an error. Unknown ENABLE_* variables
         help="Webhook format (overrides WEBHOOK_TYPE)",
     )
 
+    parser.add_argument(
+        "--mode",
+        choices=["all", "frequent", "limited"],
+        default="all",
+    )
+
     return parser.parse_args()
 
 
@@ -2397,6 +2438,8 @@ def main() -> int:
         config.webhook_url = args.webhook_url
     if args.webhook_type:
         config.webhook_type = args.webhook_type
+    if args.mode:
+        config.mode = args.mode
 
     # Setup logging
     logger = setup_logging(config)
@@ -2429,7 +2472,7 @@ def main() -> int:
         list_blocklist_sources(logger)
         return 0
 
-    # Initialize and start Prometheus metrics server
+    # Initialize Prometheus metrics
     if config.metrics_enabled and PROMETHEUS_AVAILABLE:
         init_metrics(config.pushgateway_url, logger)
 
