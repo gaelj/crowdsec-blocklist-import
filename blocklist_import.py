@@ -1362,8 +1362,9 @@ class FetchResult:
     """Result of fetching a blocklist."""
     source: BlocklistSource
     success: bool
-    new_ip_count: int = 0
-    refreshed_ip_count: int = 0
+    pulled_unique_ip_count: int = 0
+    new_unique_ip_count: int = 0
+    refreshed_unique_ip_count: int = 0
     duration: float = 0.0
     error_type: str = ""                    # "fetch" | "parse" | "import" | "encoding"
     error_exception: Optional[Exception] = None   # original exception (sanitized before use as label)
@@ -1379,7 +1380,7 @@ def fetch_blocklist(
     source: BlocklistSource,
     config: Config,
     seen_ips: list[tuple[str, timedelta]],
-    all_known_ips_set: set[str],
+    non_expiring_known_ips: list[str],
     expiring_known_ips: list[str],
     allowlist: Allowlist,
     stats: "ImportStats",
@@ -1394,7 +1395,7 @@ def fetch_blocklist(
     """
 
     new_ips: list[str] = []
-    refreshed_ips_list: list[str] = []
+    refresh_ips: list[str] = []
     t0 = time.time()
 
     try:
@@ -1414,12 +1415,17 @@ def fetch_blocklist(
 
         # Process line by line (streaming)
         # Use iter_lines without decode_unicode to handle encoding ourselves
-        total_imported_ip_raw_cnt = 0
-        ignored_ip_cnt = 0
+        total_raw_ip_cnt = 0
+        total_imported_unique_ip_cnt = 0
+        ignored_white_listed_ip_cnt = 0
+        refreshed_ip_cnt = 0
+        total_imported_unique_ip_cnt = 0
         parse_errors: dict[str, int] = {}
         decision_duration = parse_duration(config.decision_duration)
 
-        raw_ips: list[str] = []
+        new_ips: list[str] = []
+
+        non_expiring_seen_ips = set(non_expiring_known_ips.copy())
 
         logger.debug(f"Parsing...")
         for raw_line in response.iter_lines():
@@ -1438,29 +1444,29 @@ def fetch_blocklist(
                     line = raw_line
 
                 for ip in extract_ips_from_line(line, parse_errors, source):
-                    raw_ips.append(ip)
+                    total_raw_ip_cnt += 1
+                    if ip not in non_expiring_seen_ips:
+                        non_expiring_seen_ips.add(ip)
+                        seen_ips.append((ip, decision_duration))
+                        if ip in expiring_known_ips:
+                            refreshed_ip_cnt += 1
+                            total_imported_unique_ip_cnt += 1
+                            refresh_ips.append(ip)
+                        else:
+                            total_imported_unique_ip_cnt += 1
+                            new_ips.append(ip)
 
-        logger.debug(f"Getting total IP count...")
-        total_imported_ip_raw_cnt = len(raw_ips)
+        logger.debug(f"Applying allow-list...")
 
-        logger.debug(f"Getting allowed to block IPs list...")
-        allowed_to_block_ips_list = [ip for ip in raw_ips if not allowlist.contains(ip)]
+        refresh_ips2 = [ip for ip in refresh_ips if not allowlist.contains(ip)]
+        new_ips2 = [ip for ip in new_ips if not allowlist.contains(ip)]
 
-        logger.debug(f"Getting allowed to block IPs set...")
-        allowed_to_block_ips_set = set(allowed_to_block_ips_list)
+        ignored_white_listed_ip_cnt = len(refresh_ips) - len(refresh_ips2) + len(new_ips) - len(new_ips2)
 
-        logger.debug(f"Getting ignored IP count...")
-        ignored_ip_cnt = total_imported_ip_raw_cnt - len(allowed_to_block_ips_list)
+        refresh_ips = refresh_ips2
+        new_ips = new_ips2
 
-        logger.debug(f"Appending to seen IPs...")
-        seen_ips += [(ip, decision_duration) for ip in allowed_to_block_ips_set]
-
-        logger.debug(f"Getting refreshed IPs...")
-        refreshed_ips_list = [ip for ip in allowed_to_block_ips_set if ip in expiring_known_ips]
-        refreshed_ip_count = len(refreshed_ips_list)
-
-        logger.debug(f"Getting new IPs...")
-        new_ips = list(allowed_to_block_ips_set - all_known_ips_set)
+        new_ip_cnt = len(new_ips)
 
         logger.debug(f"Finishing...")
         # Log parse errors (capped)
@@ -1474,35 +1480,30 @@ def fetch_blocklist(
         nb_errors = sum(parse_errors.values())
         stats.parse_errors += nb_errors
 
-        ignored_ips = f"{ignored_ip_cnt} ignored IPs (allow-list), " if ignored_ip_cnt > 0 else ""
         error_cnt = f", {nb_errors} parse errors" if nb_errors > 0 else ""
+        ignored_ips = f"{ignored_white_listed_ip_cnt} ignored IPs (allow-list), " if ignored_white_listed_ip_cnt > 0 else ""
+        duration = time.time() - t0
         logger.debug(
-            f"{source.name}: {total_imported_ip_raw_cnt} total IPs{error_cnt}, "
+            f"{source.name}: "
+            f"{total_raw_ip_cnt} total IPs, "
+            f"{total_imported_unique_ip_cnt} imported IPs"
+            f"{error_cnt}, "
             f"{ignored_ips}"
-            f"{len(new_ips) - refreshed_ip_count} unique new IPs, "
-            f"{refreshed_ip_count} refreshed IPs"
+            f"{new_ip_cnt} unique new IPs, "
+            f"{refreshed_ip_cnt} refreshed IPs, "
+            f"duration: {duration} sec"
         )
 
-        duration = time.time() - t0
-        return new_ips, refreshed_ips_list, FetchResult(
+        return new_ips, refresh_ips, FetchResult(
             source=source,
             success=True,
-            new_ip_count=len(new_ips),
-            refreshed_ip_count=refreshed_ip_count,
+            pulled_unique_ip_count=total_imported_unique_ip_cnt,
+            new_unique_ip_count=new_ip_cnt,
+            refreshed_unique_ip_count=refreshed_ip_cnt,
+            # white_listed_ips
             duration=duration,
             parse_errors=parse_errors,
         )
-
-    # except requests.RequestException as e:
-    #     duration = time.time() - t0
-    #     logger.warning(f"{source.name}: unavailable ({e})")
-    #     return new_ips, FetchResult(
-    #         source=source,
-    #         success=False,
-    #         duration=duration,
-    #         error_type="fetch",
-    #         error_exception=e,
-    #     )
 
     except Exception as e:
         if isinstance(e , requests.RequestException):
@@ -1510,7 +1511,7 @@ def fetch_blocklist(
         else:
             logger.error(f"{source.name}: unexpected error ({e})")
         duration = time.time() - t0
-        return new_ips, refreshed_ips_list, FetchResult(
+        return new_ips, refresh_ips, FetchResult(
             source=source,
             success=False,
             duration=duration,
@@ -1971,8 +1972,8 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
     # Process each blocklist source
     for source in enabled_sources:
         refresh_period = timedelta(minutes=(config.refresh_period_limited_mn if source.rate_limited else config.refresh_period_frequent_mn))
-        all_known_ips_set = set([ip for ip, _ in seen_ips])
         expiring_known_ips_list = list([ip for ip, expiration in seen_ips if expiration <= refresh_period])
+        non_expiring_known_ips = list([ip for ip, expiration in seen_ips if expiration > refresh_period])
 
         source_ok = 0
         source_failed = 0
@@ -1983,8 +1984,8 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
             new_ips, refreshed_ips, result = [], source.preset_values, FetchResult(
                 source=source,
                 success=True,
-                new_ip_count=len(source.preset_values),
-                refreshed_ip_count=len(source.preset_values),
+                new_unique_ip_count=0,
+                refreshed_unique_ip_count=len(source.preset_values),
                 duration=0,
                 parse_errors={},
             )
@@ -1994,8 +1995,8 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                 source=source,
                 config=config,
                 seen_ips=seen_ips,
-                all_known_ips_set=all_known_ips_set,
                 expiring_known_ips=expiring_known_ips_list,
+                non_expiring_known_ips=non_expiring_known_ips,
                 allowlist=allowlist,
                 stats=stats,
                 logger=logger,
@@ -2007,7 +2008,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
                 if result.success:
                     metrics.record_source_success(
                         source_name=source.name,
-                        ip_count=result.new_ip_count,
+                        ip_count=result.new_unique_ip_count,
                         duration_sec=result.duration,
                     )
                     if result.parse_errors:
