@@ -29,6 +29,20 @@
 **Table of Contents:**
 [Why This Tool](#why-ip-freshness-matters) | [Features](#core-features) | [Quickstart](#quickstart) | [Installation](#installation) | [Configuration](#configuration) | [Blocklists](#supported-blocklists) | [CLI Usage](#cli-usage) | [Advanced Usage](#advanced-usage) | [Monitoring](#monitoring) | [Troubleshooting](#troubleshooting) | [Contributing](#contributing)
 
+## Security Advisory
+
+~~This is the official CrowdSec blocklist import tool maintained at [wolffcatskyy/crowdsec-blocklist-import](https://github.com/wolffcatskyy/crowdsec-blocklist-import).~~
+
+~~If you downloaded this from another source or a different GitHub user, you may be using an impostor repository with malicious code. Always verify you're using the official source.~~
+
+This is a fork of the official CrowdSec blocklist import tool.
+
+---
+
+## AI Disclosure
+
+This project was developed with assistance from Claude AI. We disclose this transparently because you deserve to know how your security tools are built.
+
 ---
 
 ## Why IP Freshness Matters
