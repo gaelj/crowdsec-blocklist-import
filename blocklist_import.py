@@ -2031,7 +2031,7 @@ def run_import(config: Config, logger: logging.Logger) -> ImportStats:
             refreshed_ips = []
             for ip in source.preset_values:
                 if ip not in seen_ips:
-                    seen_ips.add(ip)
+                    seen_ips.append(ip)
                     new_ips.append(ip)
                 else:
                     refreshed_ips.append(ip)
