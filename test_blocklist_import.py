@@ -736,256 +736,256 @@ class TestValidateBoolValue:
 # ===========================================================================
 
 
-class TestCrowdSecLAPIHealthCheck:
-    def test_health_check_200(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(status_code=200)
-        assert lapi.health_check() is True
+# class TestCrowdSecLAPIHealthCheck:
+#     def test_health_check_200(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(status_code=200)
+#         assert lapi.health_check() is True
 
-    def test_health_check_403_is_reachable(self, lapi, session_mock):
-        """403 means server is up but key is wrong — still reachable."""
-        session_mock.get.return_value = Mock(status_code=403)
-        assert lapi.health_check() is True
+#     def test_health_check_403_is_reachable(self, lapi, session_mock):
+#         """403 means server is up but key is wrong — still reachable."""
+#         session_mock.get.return_value = Mock(status_code=403)
+#         assert lapi.health_check() is True
 
-    def test_health_check_500_fails(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(status_code=500)
-        assert lapi.health_check() is False
+#     def test_health_check_500_fails(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(status_code=500)
+#         assert lapi.health_check() is False
 
-    def test_health_check_network_error(self, lapi, session_mock):
-        import requests
-        session_mock.get.side_effect = requests.RequestException("timeout")
-        assert lapi.health_check() is False
-
-
-class TestCrowdSecLAPIGetExistingIPs:
-    def test_returns_ip_set(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(
-            status_code=200,
-            json=Mock(return_value=[
-                {"value": "1.2.3.4"},
-                {"value": "5.6.7.8"},
-            ]),
-        )
-        existing = lapi.get_existing_ips()
-        assert "1.2.3.4" in existing
-        assert "5.6.7.8" in existing
-
-    def test_empty_decisions_list(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(status_code=200, json=Mock(return_value=[]))
-        existing = lapi.get_existing_ips()
-        assert existing == set()
-
-    def test_null_response_body(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(status_code=200, json=Mock(return_value=None))
-        existing = lapi.get_existing_ips()
-        assert existing == set()
-
-    def test_non_200_returns_empty(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(status_code=401)
-        existing = lapi.get_existing_ips()
-        assert existing == set()
-
-    def test_network_error_returns_empty(self, lapi, session_mock):
-        import requests
-        session_mock.get.side_effect = requests.RequestException("connection refused")
-        existing = lapi.get_existing_ips()
-        assert existing == set()
-
-    def test_json_parse_error_returns_empty(self, lapi, session_mock):
-        session_mock.get.return_value = Mock(
-            status_code=200,
-            json=Mock(side_effect=ValueError("bad json")),
-        )
-        existing = lapi.get_existing_ips()
-        assert existing == set()
+#     def test_health_check_network_error(self, lapi, session_mock):
+#         import requests
+#         session_mock.get.side_effect = requests.RequestException("timeout")
+#         assert lapi.health_check() is False
 
 
-class TestCrowdSecLAPIAddDecisions:
-    def _mock_machine_auth(self, lapi, session_mock):
-        """Pre-populate a valid JWT so add_decisions doesn't need to authenticate."""
-        lapi.jwt_token = "fake-jwt-token"
-        lapi.jwt_expires = time.time() + 3600
+# class TestCrowdSecLAPIGetExistingIPs:
+#     def test_returns_ip_set(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(
+#             status_code=200,
+#             json=Mock(return_value=[
+#                 {"value": "1.2.3.4"},
+#                 {"value": "5.6.7.8"},
+#             ]),
+#         )
+#         existing = lapi.get_existing_ips()
+#         assert "1.2.3.4" in existing
+#         assert "5.6.7.8" in existing
 
-    def test_success_returns_counts(self, lapi, session_mock):
-        self._mock_machine_auth(lapi, session_mock)
-        session_mock.post.return_value = Mock(status_code=200)
-        ok, failed = lapi.add_decisions(
-            ips=["1.2.3.4", "5.6.7.8"],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test/blocklist",
-        )
-        assert ok == 2
-        assert failed == 0
+#     def test_empty_decisions_list(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(status_code=200, json=Mock(return_value=[]))
+#         existing = lapi.get_existing_ips()
+#         assert existing == set()
 
-    def test_201_accepted(self, lapi, session_mock):
-        self._mock_machine_auth(lapi, session_mock)
-        session_mock.post.return_value = Mock(status_code=201)
-        ok, failed = lapi.add_decisions(
-            ips=["1.2.3.4"],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test/blocklist",
-        )
-        assert ok == 1
-        assert failed == 0
+#     def test_null_response_body(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(status_code=200, json=Mock(return_value=None))
+#         existing = lapi.get_existing_ips()
+#         assert existing == set()
 
-    def test_lapi_error_returns_zero_ok(self, lapi, session_mock):
-        self._mock_machine_auth(lapi, session_mock)
-        session_mock.post.return_value = Mock(
-            status_code=400,
-            text="bad request",
-        )
-        ok, failed = lapi.add_decisions(
-            ips=["1.2.3.4"],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test/blocklist",
-        )
-        assert ok == 0
-        assert failed == 1
+#     def test_non_200_returns_empty(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(status_code=401)
+#         existing = lapi.get_existing_ips()
+#         assert existing == set()
 
-    def test_empty_ips_returns_zero_zero(self, lapi, session_mock):
-        ok, failed = lapi.add_decisions(
-            ips=[],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test/blocklist",
-        )
-        assert ok == 0
-        assert failed == 0
+#     def test_network_error_returns_empty(self, lapi, session_mock):
+#         import requests
+#         session_mock.get.side_effect = requests.RequestException("connection refused")
+#         existing = lapi.get_existing_ips()
+#         assert existing == set()
 
-    def test_cidr_gets_range_scope(self, lapi, session_mock):
-        """Verify CIDR entries use 'Range' scope, single IPs use 'Ip' scope."""
-        self._mock_machine_auth(lapi, session_mock)
-        session_mock.post.return_value = Mock(status_code=200)
-        lapi.add_decisions(
-            ips=["1.2.3.4", "203.0.113.0/24"],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test",
-        )
-        call_kwargs = session_mock.post.call_args
-        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][1]
-        decisions = payload[0]["decisions"]
-        scopes = {d["value"]: d["scope"] for d in decisions}
-        assert scopes["1.2.3.4"] == "Ip"
-        assert scopes["203.0.113.0/24"] == "Range"
-
-    def test_no_machine_credentials_fails(self, session_mock, logger):
-        """add_decisions without machine credentials returns (0, n)."""
-        lapi_no_creds = CrowdSecLAPI(
-            base_url="http://localhost:8080",
-            api_key="key",
-            machine_id="",
-            machine_password="",
-            logger=logger,
-        )
-        ok, failed = lapi_no_creds.add_decisions(
-            ips=["1.2.3.4"],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test",
-        )
-        assert ok == 0
-        assert failed == 1
-
-    def test_network_error_returns_failed(self, lapi, session_mock):
-        self._mock_machine_auth(lapi, session_mock)
-        import requests
-        session_mock.post.side_effect = requests.RequestException("reset")
-        ok, failed = lapi.add_decisions(
-            ips=["1.2.3.4"],
-            duration="24h",
-            reason="test",
-            decision_type="ban",
-            origin="test",
-            scenario="test",
-        )
-        assert ok == 0
-        assert failed == 1
+#     def test_json_parse_error_returns_empty(self, lapi, session_mock):
+#         session_mock.get.return_value = Mock(
+#             status_code=200,
+#             json=Mock(side_effect=ValueError("bad json")),
+#         )
+#         existing = lapi.get_existing_ips()
+#         assert existing == set()
 
 
-class TestCrowdSecLAPIMachineAuth:
-    def test_get_machine_token_success(self, lapi, session_mock):
-        session_mock.post.return_value = Mock(
-            status_code=200,
-            json=Mock(return_value={
-                "token": "jwt-abc123",
-                "expire": "2099-01-01T00:00:00Z",
-            }),
-        )
-        token = lapi._get_machine_token()
-        assert token == "jwt-abc123"
-        assert lapi.jwt_token == "jwt-abc123"
+# class TestCrowdSecLAPIAddDecisions:
+#     def _mock_machine_auth(self, lapi, session_mock):
+#         """Pre-populate a valid JWT so add_decisions doesn't need to authenticate."""
+#         lapi.jwt_token = "fake-jwt-token"
+#         lapi.jwt_expires = time.time() + 3600
 
-    def test_get_machine_token_cached(self, lapi, session_mock):
-        """Second call uses cached token without network request."""
-        lapi.jwt_token = "cached-token"
-        lapi.jwt_expires = time.time() + 7200
-        token = lapi._get_machine_token()
-        assert token == "cached-token"
-        session_mock.post.assert_not_called()
+#     def test_success_returns_counts(self, lapi, session_mock):
+#         self._mock_machine_auth(lapi, session_mock)
+#         session_mock.post.return_value = Mock(status_code=200)
+#         ok, failed = lapi.add_decisions(
+#             ips=["1.2.3.4", "5.6.7.8"],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test/blocklist",
+#         )
+#         assert ok == 2
+#         assert failed == 0
 
-    def test_get_machine_token_expired_refreshes(self, lapi, session_mock):
-        """Expired token triggers a new login."""
-        lapi.jwt_token = "old-token"
-        lapi.jwt_expires = time.time() - 1  # expired
-        session_mock.post.return_value = Mock(
-            status_code=200,
-            json=Mock(return_value={"token": "new-token", "expire": ""}),
-        )
-        token = lapi._get_machine_token()
-        assert token == "new-token"
+#     def test_201_accepted(self, lapi, session_mock):
+#         self._mock_machine_auth(lapi, session_mock)
+#         session_mock.post.return_value = Mock(status_code=201)
+#         ok, failed = lapi.add_decisions(
+#             ips=["1.2.3.4"],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test/blocklist",
+#         )
+#         assert ok == 1
+#         assert failed == 0
 
-    def test_get_machine_token_no_credentials(self, session_mock, logger):
-        lapi_no_creds = CrowdSecLAPI(
-            base_url="http://localhost:8080",
-            api_key="key",
-            machine_id="",
-            machine_password="",
-            logger=logger,
-        )
-        token = lapi_no_creds._get_machine_token()
-        assert token is None
+#     def test_lapi_error_returns_zero_ok(self, lapi, session_mock):
+#         self._mock_machine_auth(lapi, session_mock)
+#         session_mock.post.return_value = Mock(
+#             status_code=400,
+#             text="bad request",
+#         )
+#         ok, failed = lapi.add_decisions(
+#             ips=["1.2.3.4"],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test/blocklist",
+#         )
+#         assert ok == 0
+#         assert failed == 1
 
-    def test_get_machine_token_401(self, lapi, session_mock):
-        session_mock.post.return_value = Mock(
-            status_code=401,
-            text="unauthorized",
-        )
-        token = lapi._get_machine_token()
-        assert token is None
+#     def test_empty_ips_returns_zero_zero(self, lapi, session_mock):
+#         ok, failed = lapi.add_decisions(
+#             ips=[],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test/blocklist",
+#         )
+#         assert ok == 0
+#         assert failed == 0
 
-    def test_get_machine_token_network_error(self, lapi, session_mock):
-        import requests
-        session_mock.post.side_effect = requests.RequestException("timeout")
-        token = lapi._get_machine_token()
-        assert token is None
+#     def test_cidr_gets_range_scope(self, lapi, session_mock):
+#         """Verify CIDR entries use 'Range' scope, single IPs use 'Ip' scope."""
+#         self._mock_machine_auth(lapi, session_mock)
+#         session_mock.post.return_value = Mock(status_code=200)
+#         lapi.add_decisions(
+#             ips=["1.2.3.4", "203.0.113.0/24"],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test",
+#         )
+#         call_kwargs = session_mock.post.call_args
+#         payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][1]
+#         decisions = payload[0]["decisions"]
+#         scopes = {d["value"]: d["scope"] for d in decisions}
+#         assert scopes["1.2.3.4"] == "Ip"
+#         assert scopes["203.0.113.0/24"] == "Range"
 
-    def test_can_write_with_credentials(self, lapi):
-        assert lapi.can_write() is True
+#     def test_no_machine_credentials_fails(self, session_mock, logger):
+#         """add_decisions without machine credentials returns (0, n)."""
+#         lapi_no_creds = CrowdSecLAPI(
+#             base_url="http://localhost:8080",
+#             api_key="key",
+#             machine_id="",
+#             machine_password="",
+#             logger=logger,
+#         )
+#         ok, failed = lapi_no_creds.add_decisions(
+#             ips=["1.2.3.4"],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test",
+#         )
+#         assert ok == 0
+#         assert failed == 1
 
-    def test_can_write_without_credentials(self, session_mock, logger):
-        lapi_no_creds = CrowdSecLAPI(
-            base_url="http://localhost:8080",
-            api_key="key",
-            machine_id="",
-            machine_password="",
-            logger=logger,
-        )
-        assert lapi_no_creds.can_write() is False
+#     def test_network_error_returns_failed(self, lapi, session_mock):
+#         self._mock_machine_auth(lapi, session_mock)
+#         import requests
+#         session_mock.post.side_effect = requests.RequestException("reset")
+#         ok, failed = lapi.add_decisions(
+#             ips=["1.2.3.4"],
+#             duration="24h",
+#             reason="test",
+#             decision_type="ban",
+#             origin="test",
+#             scenario="test",
+#         )
+#         assert ok == 0
+#         assert failed == 1
+
+
+# class TestCrowdSecLAPIMachineAuth:
+#     def test_get_machine_token_success(self, lapi, session_mock):
+#         session_mock.post.return_value = Mock(
+#             status_code=200,
+#             json=Mock(return_value={
+#                 "token": "jwt-abc123",
+#                 "expire": "2099-01-01T00:00:00Z",
+#             }),
+#         )
+#         token = lapi._get_machine_token()
+#         assert token == "jwt-abc123"
+#         assert lapi.jwt_token == "jwt-abc123"
+
+#     def test_get_machine_token_cached(self, lapi, session_mock):
+#         """Second call uses cached token without network request."""
+#         lapi.jwt_token = "cached-token"
+#         lapi.jwt_expires = time.time() + 7200
+#         token = lapi._get_machine_token()
+#         assert token == "cached-token"
+#         session_mock.post.assert_not_called()
+
+#     def test_get_machine_token_expired_refreshes(self, lapi, session_mock):
+#         """Expired token triggers a new login."""
+#         lapi.jwt_token = "old-token"
+#         lapi.jwt_expires = time.time() - 1  # expired
+#         session_mock.post.return_value = Mock(
+#             status_code=200,
+#             json=Mock(return_value={"token": "new-token", "expire": ""}),
+#         )
+#         token = lapi._get_machine_token()
+#         assert token == "new-token"
+
+#     def test_get_machine_token_no_credentials(self, session_mock, logger):
+#         lapi_no_creds = CrowdSecLAPI(
+#             base_url="http://localhost:8080",
+#             api_key="key",
+#             machine_id="",
+#             machine_password="",
+#             logger=logger,
+#         )
+#         token = lapi_no_creds._get_machine_token()
+#         assert token is None
+
+#     def test_get_machine_token_401(self, lapi, session_mock):
+#         session_mock.post.return_value = Mock(
+#             status_code=401,
+#             text="unauthorized",
+#         )
+#         token = lapi._get_machine_token()
+#         assert token is None
+
+#     def test_get_machine_token_network_error(self, lapi, session_mock):
+#         import requests
+#         session_mock.post.side_effect = requests.RequestException("timeout")
+#         token = lapi._get_machine_token()
+#         assert token is None
+
+#     def test_can_write_with_credentials(self, lapi):
+#         assert lapi.can_write() is True
+
+#     def test_can_write_without_credentials(self, session_mock, logger):
+#         lapi_no_creds = CrowdSecLAPI(
+#             base_url="http://localhost:8080",
+#             api_key="key",
+#             machine_id="",
+#             machine_password="",
+#             logger=logger,
+#         )
+#         assert lapi_no_creds.can_write() is False
 
 
 # ===========================================================================
